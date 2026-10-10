@@ -922,6 +922,15 @@ button.metric:hover {
   color: var(--muted);
 }
 
+.ev-loop {
+  margin-top: 6px;
+}
+
+.ev-loop .ev-text {
+  font-weight: 600;
+  color: var(--ink);
+}
+
 .ev-thread {
   font-family: var(--mono);
   font-size: 10px;

@@ -2,9 +2,11 @@ import { toDegrees, wrap180 } from "../core/angle";
 import { distance, robotBox } from "../core/geometry";
 import type { Pose } from "../core/geometry";
 import type { FieldDefinition } from "../field/types";
-import type { CallStmt, Diagnostic, SourceRef, Stmt } from "../program/ast";
+import type { CallStmt, Diagnostic, LoopStmt, SourceRef, Stmt } from "../program/ast";
 import { findParam } from "../program/ast";
 import { ExpressionError, evaluate } from "../program/expression";
+import { loopPasses, MAX_LOOP_PASSES, substitute } from "../program/loops";
+import type { LoopPasses } from "../program/loops";
 import { mechanismDuration } from "../profiles/types";
 import type { TeamProfile } from "../profiles/types";
 import type { RobotConfig } from "../robot/config";
@@ -26,7 +28,7 @@ export interface SimSettings {
   dt?: number;
 }
 
-export type EntryKind = "motion" | "mechanism" | "wait" | "pose" | "instant" | "group";
+export type EntryKind = "motion" | "mechanism" | "wait" | "pose" | "instant" | "group" | "loop";
 export type EntryStatus = "running" | "done" | "timeout" | "cancelled" | "unfinished";
 
 export interface TimelineEntry {
@@ -277,7 +279,32 @@ function* runStatement(rt: Runtime, stmt: Stmt, thread: string): Task {
     rt.finish(group, "done");
     return;
   }
+  if (stmt.kind === "loop") {
+    yield* runLoop(rt, stmt, thread);
+    return;
+  }
   yield* runCall(rt, stmt, thread);
+}
+
+function* runLoop(rt: Runtime, stmt: LoopStmt, thread: string): Task {
+  let passes: LoopPasses;
+  try {
+    passes = loopPasses(stmt.iteration, (text) => rt.evaluate(text));
+  } catch {
+    rt.report(stmt.line, "warning", "This loop's start, end or step isn't a plain number, so the loop is skipped.");
+    return;
+  }
+  if (passes.capped) {
+    rt.report(stmt.line, "warning", `This loop runs more than ${MAX_LOOP_PASSES} times, so only the first ${MAX_LOOP_PASSES} passes are simulated.`);
+  }
+  const { variable } = stmt.iteration;
+  const total = passes.values.length;
+  for (const [index, value] of passes.values.entries()) {
+    const label = value.replace(/\b[A-Za-z_]\w*::/g, "");
+    const pass = rt.begin(thread, { line: stmt.line, text: `${variable} = ${label} · ${index + 1}/${total}` }, "loop");
+    yield* runList(rt, substitute(stmt.body, variable, value), thread);
+    rt.finish(pass, "done");
+  }
 }
 
 function* waitSeconds(rt: Runtime, seconds: number): Task {

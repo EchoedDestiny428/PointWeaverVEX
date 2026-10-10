@@ -66,6 +66,8 @@ function drivesChassis(stmts: Stmt[], profile: TeamProfile): boolean {
   for (const stmt of stmts) {
     if (stmt.kind === "parallel") {
       if (stmt.tasks.some((task) => drivesChassis(task, profile))) return true;
+    } else if (stmt.kind === "loop") {
+      if (drivesChassis(stmt.body, profile)) return true;
     } else if (stmt.kind === "call") {
       const dot = stmt.callee.lastIndexOf(".");
       if (dot < 0) continue;

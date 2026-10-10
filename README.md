@@ -53,12 +53,13 @@ Measure these from the real robot so the timing means something.
 | `chassis.donut(...)` | Crimson's orbit turn, with `fastSpeed` / `slowSpeed` |
 | `chassis.waitUntilDone()`, `waitUntil(d)`, `cancelMotion()`, `setPose(...)` | Same as LemLib |
 | `parallel({ [] { ... }, [] { ... } })` | The tasks run together, and the routine continues when all of them finish |
+| `for (const double stage : {kStage1, kStage2})`, `for (int i = 0; i < 4; i++)` | One pass per value. The value is substituted into the body, so `flip_out(stage, …)` becomes `flip_out(kStage2, …)` on pass 2, and the timeline marks each pass |
 | `pros::delay(ms)` | Waits |
 | `macros::flip_out`, `dual_pickup`, … | Blocks for its **Macro time** |
 | `claw::`, `intake::`, `intake_lift.set_value`, … | Instant |
 | Math in arguments | `-24 + 7.5`, `chassis.getPose().theta + 90`, `M_PI` |
 
-`setup()` runs right before `run()`. `if`, loops and variables are skipped, and each skip shows a warning on its line.
+`setup()` runs right before `run()`. `if`, `while`, loops over named arrays and variables are skipped, and each skip shows a warning on its line.
 
 ## Develop
 

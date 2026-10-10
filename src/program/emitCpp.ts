@@ -15,12 +15,16 @@ export function emitStatements(statements: Stmt[], indent = "    "): string {
       lines.push(`${indent}${stmt.callee}(${stmt.args.map(emitArg).join(", ")});`);
     } else if (stmt.kind === "parallel") {
       lines.push(`${indent}parallel({`);
-      for (const task of stmt.tasks) {
-        lines.push(`${indent}    [] {`);
+      for (const [index, task] of stmt.tasks.entries()) {
+        lines.push(`${indent}    [${stmt.captures?.[index] ?? ""}] {`);
         lines.push(emitStatements(task, `${indent}        `));
         lines.push(`${indent}    },`);
       }
       lines.push(`${indent}});`);
+    } else if (stmt.kind === "loop") {
+      lines.push(`${indent}for (${stmt.header}) {`);
+      lines.push(emitStatements(stmt.body, `${indent}    `));
+      lines.push(`${indent}}`);
     } else {
       lines.push(`${indent}// skipped: ${stmt.text}`);
     }

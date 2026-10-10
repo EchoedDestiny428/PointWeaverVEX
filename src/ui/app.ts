@@ -19,6 +19,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  Repeat,
   RotateCcw,
   RotateCw,
   SlidersHorizontal,
@@ -88,7 +89,7 @@ const OBSTACLES: Array<[keyof ObstacleFilter, string, IconNode]> = [
   ["elements", "Pins", Circle],
 ];
 const OBSTACLE_ICONS: Record<ObstacleKind, IconNode> = { wall: BrickWall, goal: Hexagon, loader: Box, element: Circle };
-const KIND_ICONS: Record<string, IconNode> = { mechanism: Cog, wait: Hourglass, pose: LocateFixed, instant: Zap, group: Split };
+const KIND_ICONS: Record<string, IconNode> = { mechanism: Cog, wait: Hourglass, pose: LocateFixed, instant: Zap, group: Split, loop: Repeat };
 const NOW_KINDS = new Set(["motion", "mechanism", "wait"]);
 
 function byId<T extends Element = HTMLElement>(id: string): T {
@@ -612,7 +613,7 @@ export async function startApp(): Promise<void> {
       row.classList.toggle("is-past", item.end <= time && !on);
       if (on) {
         rows.add(index);
-        if (item.kind !== "group") lines.add(item.line);
+        if (item.kind !== "group" && item.kind !== "loop") lines.add(item.line);
       }
     });
     const newRow = [...rows].find((index) => !activeRows.has(index));

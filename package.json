@@ -1,7 +1,7 @@
 {
   "name": "pointweaver-vex",
   "productName": "PointWeaver",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Top-down simulator for VEX LemLib autonomous routines, built to grow into a path planner.",
   "author": "Crimson",

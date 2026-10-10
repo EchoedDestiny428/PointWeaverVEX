@@ -29,6 +29,33 @@ export interface CallStmt extends SourceRef {
 export interface ParallelStmt extends SourceRef {
   kind: "parallel";
   tasks: Stmt[][];
+  captures?: string[];
+}
+
+export type LoopCompare = "<" | "<=" | ">" | ">=" | "!=";
+
+export interface RangeLoop {
+  kind: "range";
+  variable: string;
+  items: string[];
+}
+
+export interface CountLoop {
+  kind: "count";
+  variable: string;
+  start: string;
+  compare: LoopCompare;
+  end: string;
+  step: string;
+}
+
+export type LoopIteration = RangeLoop | CountLoop;
+
+export interface LoopStmt extends SourceRef {
+  kind: "loop";
+  header: string;
+  iteration: LoopIteration;
+  body: Stmt[];
 }
 
 export interface UnsupportedStmt extends SourceRef {
@@ -36,7 +63,7 @@ export interface UnsupportedStmt extends SourceRef {
   reason: string;
 }
 
-export type Stmt = CallStmt | ParallelStmt | UnsupportedStmt;
+export type Stmt = CallStmt | ParallelStmt | LoopStmt | UnsupportedStmt;
 
 export interface RoutineFunction {
   name: string;
