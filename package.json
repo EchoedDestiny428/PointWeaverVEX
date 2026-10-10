@@ -1,0 +1,70 @@
+{
+  "name": "pointweaver-vex",
+  "productName": "PointWeaver",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Top-down simulator for VEX LemLib autonomous routines, built to grow into a path planner.",
+  "author": "Crimson",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "app": "npm run build && npm run build:electron && electron .",
+    "app:dev": "npm run build:electron && electron . --dev",
+    "dist": "npm run build && npm run build:electron && electron-builder --win",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3",
+    "lucide": "1.47.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vite-plugin-singlefile": "^2.3.3",
+    "vitest": "^5.0.3"
+  },
+  "build": {
+    "appId": "org.pointweaver.vex",
+    "productName": "PointWeaver",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "PointWeaver-Setup-${version}.exe"
+    },
+    "portable": {
+      "artifactName": "PointWeaver-${version}-portable.exe"
+    }
+  }
+}
