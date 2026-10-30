@@ -32,6 +32,7 @@ export const CRIMSON_PROFILE: TeamProfile = {
     "macros::cancel",
     "intake_lift.",
     "pull_toggle.",
+    "controller.",
   ],
   registry: {
     entry: /\{\s*"([^"]+)"\s*,\s*([A-Za-z_][\w:]*|nullptr)\s*,\s*([A-Za-z_][\w:]*|nullptr)\s*\}/g,

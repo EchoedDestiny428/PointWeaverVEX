@@ -1,28 +1,32 @@
 import type { Vec2 } from "../core/geometry";
 import type { FieldDefinition, FieldElement, Goal, LoadZone, Loader, TapeLine } from "./types";
 
-const mm = (value: number): number => value / 25.4;
+const TILE = 24;
+const DESIGN_TILE_MM = 600;
+const tile = (n: number): number => n * TILE;
+const mm = (value: number): number => (value * TILE) / DESIGN_TILE_MM;
 const at = (xMm: number, yMm: number): Vec2 => ({ x: mm(xMm), y: mm(yMm) });
+const corner = (tx: number, ty: number): Vec2 => ({ x: tile(tx), y: tile(ty) });
 
-const HALF = mm(1783.2);
+const HALF = tile(3);
 const ZONE_X = mm(1492);
 const ZONE_Y = mm(1173);
 const DIAGONAL_END = mm(1492);
-const MIDFIELD = mm(600);
+const MIDFIELD = tile(1);
 const GOAL_SIZE = 5;
 const CUP_RADIUS = 2.5;
 const WALL_CUP_SPACING = mm(200);
 
 const goals: Goal[] = [
-  { id: "goal-0", label: "0", position: at(0, 0), owner: "neutral", size: GOAL_SIZE },
-  { id: "goal-1a", label: "1", position: at(-1200, 600), owner: "neutral", size: GOAL_SIZE },
-  { id: "goal-1b", label: "1", position: at(1200, -600), owner: "neutral", size: GOAL_SIZE },
-  { id: "goal-4a", label: "4", position: at(-600, 1200), owner: "neutral", size: GOAL_SIZE },
-  { id: "goal-4b", label: "4", position: at(600, -1200), owner: "neutral", size: GOAL_SIZE },
-  { id: "goal-red-2", label: "2", position: at(-1200, -600), owner: "red", size: GOAL_SIZE },
-  { id: "goal-red-3", label: "3", position: at(-600, -1200), owner: "red", size: GOAL_SIZE },
-  { id: "goal-blue-2", label: "2", position: at(1200, 600), owner: "blue", size: GOAL_SIZE },
-  { id: "goal-blue-3", label: "3", position: at(600, 1200), owner: "blue", size: GOAL_SIZE },
+  { id: "goal-0", label: "0", position: corner(0, 0), owner: "neutral", size: GOAL_SIZE },
+  { id: "goal-1a", label: "1", position: corner(-2, 1), owner: "neutral", size: GOAL_SIZE },
+  { id: "goal-1b", label: "1", position: corner(2, -1), owner: "neutral", size: GOAL_SIZE },
+  { id: "goal-4a", label: "4", position: corner(-1, 2), owner: "neutral", size: GOAL_SIZE },
+  { id: "goal-4b", label: "4", position: corner(1, -2), owner: "neutral", size: GOAL_SIZE },
+  { id: "goal-red-2", label: "2", position: corner(-2, -1), owner: "red", size: GOAL_SIZE },
+  { id: "goal-red-3", label: "3", position: corner(-1, -2), owner: "red", size: GOAL_SIZE },
+  { id: "goal-blue-2", label: "2", position: corner(2, 1), owner: "blue", size: GOAL_SIZE },
+  { id: "goal-blue-3", label: "3", position: corner(1, 2), owner: "blue", size: GOAL_SIZE },
 ];
 
 const loaders: Loader[] = [-1, 1].flatMap((sx) =>
@@ -61,18 +65,18 @@ const tape: TapeLine[] = [
 }));
 
 const innerElements: FieldElement[] = [
-  { id: "cross-1", kind: "four-pin-cross", position: at(-1200, 1200), radius: 3.5 },
-  { id: "cross-2", kind: "four-pin-cross", position: at(-600, 600), radius: 3.5 },
-  { id: "cross-3", kind: "four-pin-cross", position: at(600, -600), radius: 3.5 },
-  { id: "cross-4", kind: "four-pin-cross", position: at(1200, -1200), radius: 3.5 },
-  { id: "cup-yellow-1", kind: "cup-yellow-pin", position: at(1200, 1200), radius: CUP_RADIUS },
-  { id: "cup-yellow-2", kind: "cup-yellow-pin", position: at(600, 600), radius: CUP_RADIUS },
-  { id: "cup-yellow-3", kind: "cup-yellow-pin", position: at(-600, -600), radius: CUP_RADIUS },
-  { id: "cup-yellow-4", kind: "cup-yellow-pin", position: at(-1200, -1200), radius: CUP_RADIUS },
-  { id: "cup-pin-top", kind: "cup-blue-red-pin", position: at(0, 600), radius: CUP_RADIUS },
-  { id: "cup-pin-bottom", kind: "cup-red-blue-pin", position: at(0, -600), radius: CUP_RADIUS },
-  { id: "cup-pin-left", kind: "cup-red-blue-pin", position: at(-600, 0), radius: CUP_RADIUS },
-  { id: "cup-pin-right", kind: "cup-blue-red-pin", position: at(600, 0), radius: CUP_RADIUS },
+  { id: "cross-1", kind: "four-pin-cross", position: corner(-2, 2), radius: 3.5 },
+  { id: "cross-2", kind: "four-pin-cross", position: corner(-1, 1), radius: 3.5 },
+  { id: "cross-3", kind: "four-pin-cross", position: corner(1, -1), radius: 3.5 },
+  { id: "cross-4", kind: "four-pin-cross", position: corner(2, -2), radius: 3.5 },
+  { id: "cup-yellow-1", kind: "cup-yellow-pin", position: corner(2, 2), radius: CUP_RADIUS },
+  { id: "cup-yellow-2", kind: "cup-yellow-pin", position: corner(1, 1), radius: CUP_RADIUS },
+  { id: "cup-yellow-3", kind: "cup-yellow-pin", position: corner(-1, -1), radius: CUP_RADIUS },
+  { id: "cup-yellow-4", kind: "cup-yellow-pin", position: corner(-2, -2), radius: CUP_RADIUS },
+  { id: "cup-pin-top", kind: "cup-blue-red-pin", position: corner(0, 1), radius: CUP_RADIUS },
+  { id: "cup-pin-bottom", kind: "cup-red-blue-pin", position: corner(0, -1), radius: CUP_RADIUS },
+  { id: "cup-pin-left", kind: "cup-red-blue-pin", position: corner(-1, 0), radius: CUP_RADIUS },
+  { id: "cup-pin-right", kind: "cup-blue-red-pin", position: corner(1, 0), radius: CUP_RADIUS },
 ];
 
 const wallSpots: Array<{ x: number; y: number; along: "x" | "y" }> = [

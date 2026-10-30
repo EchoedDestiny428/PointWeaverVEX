@@ -52,7 +52,7 @@ describe("collision geometry", () => {
     expect(boxHitsCircle(box, { x: 12, y: 0 }, 1)).toBe(false);
     expect(boxHitsRect(box, { x: 0, y: 12 }, 4, 4)).toBe(true);
     expect(boxHitsRect(box, { x: 0, y: 14 }, 4, 4)).toBe(false);
-    expect(boxLeavesSquare(robotBox({ x: 66, y: 0, theta: 0 }, 15, 15), 70.2)).toBe(true);
+    expect(boxLeavesSquare(robotBox({ x: 66, y: 0, theta: 0 }, 15, 15), 72)).toBe(true);
   });
 });
 
@@ -125,5 +125,40 @@ describe("Crimson skills example", () => {
     expect(result.finished).toBe(true);
     expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
     expect(result.duration).toBeGreaterThan(10);
+  });
+});
+
+describe("setPoseFromGoal", () => {
+  it("puts the robot's centre the contact distance behind its back", () => {
+    const result = run(`void run() {
+      chassis.setPose(-40, -48, -90);
+      chassis.moveToPoint(-24, -48, 3000, {.forwards = false});
+      chassis.waitUntilDone();
+      chassis.setPoseFromGoal(-24, -48);
+    }`);
+    const end = last(result);
+    expect(end.x).toBeCloseTo(-24 + 7 * Math.sin((end.theta * Math.PI) / 180), 3);
+    expect(end.y).toBeCloseTo(-48 + 7 * Math.cos((end.theta * Math.PI) / 180), 3);
+    expect(end.x).toBeCloseTo(-31, 0);
+    expect(result.poseResets.map((reset) => reset.line)).toEqual([5]);
+  });
+
+  it("uses the front and a custom distance when asked", () => {
+    const end = last(run("void run() { chassis.setPose(0, 10, 180); chassis.setPoseFromGoal(0, 0, {.forwards = true, .distance = 9}); }"));
+    expect(end.x).toBeCloseTo(0, 3);
+    expect(end.y).toBeCloseTo(9, 3);
+  });
+
+  it("skips the reset when the snap would move the robot more than maxCorrection, like the robot", () => {
+    const result = run("void run() { chassis.setPose(0, 0, 0); chassis.setPoseFromGoal(0, 0, {.distance = 12}); }");
+    expect(last(result).y).toBeCloseTo(0, 3);
+    expect(result.poseResets).toEqual([]);
+    expect(result.diagnostics[0].message).toMatch(/more than maxCorrection/);
+  });
+
+  it("skips the reset when the robot is nowhere near the goal", () => {
+    const result = run("void run() { chassis.setPose(30, 30, 0); chassis.setPoseFromGoal(-24, -48); }");
+    expect(last(result).x).toBeCloseTo(30, 3);
+    expect(result.diagnostics[0].message).toMatch(/too far to be touching it/);
   });
 });

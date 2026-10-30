@@ -1,4 +1,4 @@
-import { toDegrees, wrap180 } from "../core/angle";
+import { toDegrees, toRadians, wrap180 } from "../core/angle";
 import { distance, robotBox } from "../core/geometry";
 import type { Pose } from "../core/geometry";
 import type { FieldDefinition } from "../field/types";
@@ -82,6 +82,8 @@ interface ActiveMotion {
 
 const OVERRUN_SECONDS = 15;
 const EPSILON = 1e-6;
+const GOAL_CONTACT_DISTANCE = 7;
+const GOAL_MAX_CORRECTION = 10;
 const DELAY_CALLS = new Set(["pros::delay", "pros::c::delay", "delay", "pros::Task::delay", "vex::wait"]);
 
 class Runtime {
@@ -364,6 +366,34 @@ function* runChassis(rt: Runtime, stmt: CallStmt, thread: string, method: string
         rt.report(stmt.line, "error", `${(error as Error).message} This setPose is skipped.`);
         return;
       }
+      rt.instant(thread, stmt, "pose");
+      return;
+    }
+    case "setPoseFromGoal": {
+      const args = rt.reader(stmt, 2);
+      let goal: { x: number; y: number };
+      let reach: number;
+      let limit: number;
+      let side: number;
+      try {
+        goal = { x: args.number(0, "goalX"), y: args.number(1, "goalY") };
+        reach = args.paramNumber("distance", GOAL_CONTACT_DISTANCE);
+        limit = args.paramNumber("maxCorrection", GOAL_MAX_CORRECTION);
+        side = args.paramBool("forwards", false) ? -1 : 1;
+      } catch (error) {
+        rt.report(stmt.line, "error", `${(error as Error).message} This reset is skipped.`);
+        return;
+      }
+      const now = rt.state.pose;
+      const heading = toRadians(now.theta);
+      const snapped = { x: goal.x + side * reach * Math.sin(heading), y: goal.y + side * reach * Math.cos(heading), theta: now.theta };
+      const correction = distance(now, snapped);
+      if (correction > limit) {
+        rt.report(stmt.line, "warning", `The snap would move the robot ${correction.toFixed(1)} in (more than maxCorrection, ${limit} in), too far to be touching it, so the reset is skipped.`);
+        rt.instant(thread, stmt, "instant");
+        return;
+      }
+      rt.setPose(snapped, stmt.line);
       rt.instant(thread, stmt, "pose");
       return;
     }
