@@ -45,7 +45,7 @@ export function drawGoal(parent: Element, goal: Goal, showLabel = true): SVGGEle
     svg("circle", { cx: x, cy: y, r: s * 0.24, class: `goal-dot goal-dot-${goal.owner}` }, group);
   }
   if (showLabel) {
-    const label = svg("text", { x: x + s * 0.62, y: y - s * 0.5, class: "goal-label" }, group);
+    const label = svg("text", { x: x + s * 0.62, y: y - s * 0.5, "data-px": x, "data-py": y, class: "goal-label" }, group);
     label.textContent = goal.label;
   }
   return group;

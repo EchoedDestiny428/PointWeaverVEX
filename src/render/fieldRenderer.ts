@@ -5,13 +5,16 @@ import { points, svg } from "./svg";
 export interface FieldView {
   obstacleNodes: Map<string, SVGGraphicsElement>;
   wall: SVGRectElement;
+  art: SVGGElement;
 }
 
 const DOUBLE_TAPE_GAP = 0.8;
 const WALL_BAR_THICKNESS = 1.4;
+const AXIS_GAP = 4.6;
 
-export function renderField(root: SVGGElement, field: FieldDefinition): FieldView {
-  root.replaceChildren();
+export function renderField(layer: SVGGElement, field: FieldDefinition): FieldView {
+  layer.replaceChildren();
+  const root = svg("g", { class: "field-art" }, layer);
   const half = field.half;
   const tile = (half * 2) / field.tiles;
   const obstacleNodes = new Map<string, SVGGraphicsElement>();
@@ -104,13 +107,14 @@ export function renderField(root: SVGGElement, field: FieldDefinition): FieldVie
     obstacleNodes.set(goal.id, drawGoal(root, goal));
   }
 
+  const axes = svg("g", { class: "field-axes" }, layer);
   for (let i = 0; i <= field.tiles; i++) {
     const v = -half + i * tile;
     const label = (Math.round(v * 10) / 10).toString();
-    const bottom = svg("text", { x: v, y: half + 4.6, "text-anchor": "middle", class: "axis" }, root);
+    const bottom = svg("text", { x: v, y: half + AXIS_GAP, "text-anchor": "middle", "dominant-baseline": "central", class: "axis" }, axes);
     bottom.textContent = label;
-    const left = svg("text", { x: -half - 2.4, y: -v + 0.8, "text-anchor": "end", class: "axis" }, root);
+    const left = svg("text", { x: -half - AXIS_GAP, y: -v, "text-anchor": "middle", "dominant-baseline": "central", class: "axis" }, axes);
     left.textContent = label;
   }
-  return { obstacleNodes, wall };
+  return { obstacleNodes, wall, art: root };
 }

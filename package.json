@@ -1,7 +1,7 @@
 {
   "name": "pointweaver-vex",
   "productName": "PointWeaver",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Top-down simulator for VEX LemLib autonomous routines, built to grow into a path planner.",
   "author": "Crimson",
@@ -17,7 +17,10 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.cli.json --noEmit",
+    "build:cli": "tsc -p tsconfig.cli.json && node scripts/esm-fix.mjs dist-cli",
+    "analyze": "npm run build:cli && node dist-cli/scripts/analyze.js",
+    "sample": "npm run build:cli && node dist-cli/scripts/make-sample.js"
   },
   "devDependencies": {
     "@types/node": "24.19.1",

@@ -2,12 +2,27 @@ import { isSourceFile } from "../project/types";
 import type { ProjectFile, ProjectSnapshot } from "../project/types";
 import type { ThemeChoice } from "./storage";
 
+export interface OpenedLog {
+  name: string;
+  path: string | null;
+  bytes: Uint8Array;
+}
+
+export interface ExportedReport {
+  report: string;
+  csv: string;
+}
+
 export interface DesktopBridge {
   openFolder(): Promise<ProjectSnapshot | null>;
   restore(): Promise<ProjectSnapshot | null>;
   reveal(relative: string): Promise<boolean>;
   setTheme(source: ThemeChoice): Promise<void>;
   onChange(callback: (snapshot: ProjectSnapshot) => void): () => void;
+  openLog(): Promise<OpenedLog | null>;
+  readLog(path: string): Promise<OpenedLog | null>;
+  exportReport(logPath: string, report: string, csv: string): Promise<ExportedReport | null>;
+  pathForFile(file: File): string;
 }
 
 declare global {

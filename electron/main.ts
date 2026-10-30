@@ -9,6 +9,13 @@ type ThemeSource = "system" | "light" | "dark";
 
 interface DesktopSettings {
   lastFolder?: string;
+  lastLogFolder?: string;
+}
+
+interface OpenedLog {
+  name: string;
+  path: string;
+  bytes: Uint8Array;
 }
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -17,6 +24,7 @@ const BAR_HEIGHT = 48;
 
 let win: BrowserWindow | null = null;
 let currentRoot: string | null = null;
+let currentLog: string | null = null;
 
 const settingsFile = (): string => path.join(app.getPath("userData"), "settings.json");
 
@@ -54,6 +62,19 @@ async function openRoot(root: string): Promise<ProjectSnapshot> {
   await writeSettings({ ...(await readSettings()), lastFolder: root });
   return snapshot;
 }
+
+async function loadLog(file: string): Promise<OpenedLog> {
+  const target = path.resolve(file);
+  const bytes = new Uint8Array(await readFile(target));
+  currentLog = target;
+  await writeSettings({ ...(await readSettings()), lastLogFolder: path.dirname(target) });
+  return { name: path.basename(target), path: target, bytes };
+}
+
+const reportPaths = (log: string): { report: string; csv: string } => {
+  const base = log.replace(/\.wpilog$/i, "");
+  return { report: `${base}.report.md`, csv: `${base}.signals.csv` };
+};
 
 function isInside(root: string, target: string): boolean {
   const relative = path.relative(root, target);
@@ -129,6 +150,39 @@ ipcMain.handle("project:reveal", async (_event, relative: unknown) => {
   const target = path.resolve(currentRoot, relative);
   if (!isInside(currentRoot, target)) return false;
   return (await shell.openPath(target)) === "";
+});
+
+ipcMain.handle("log:open", async () => {
+  const { lastLogFolder } = await readSettings();
+  const options = {
+    title: "Open a robot log",
+    defaultPath: lastLogFolder,
+    filters: [{ name: "Robot log", extensions: ["wpilog"] }],
+    properties: ["openFile" as const],
+  };
+  const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+  if (picked.canceled || picked.filePaths.length === 0) return null;
+  return loadLog(picked.filePaths[0]);
+});
+
+ipcMain.handle("log:read", async (_event, file: unknown) => {
+  if (typeof file !== "string" || !path.isAbsolute(file) || !/\.wpilog$/i.test(file)) return null;
+  try {
+    return await loadLog(file);
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle("log:export", async (_event, log: unknown, report: unknown, csv: unknown) => {
+  if (!currentLog || typeof log !== "string" || typeof report !== "string" || typeof csv !== "string") return null;
+  if (path.resolve(log) !== currentLog) return null;
+  const out = reportPaths(currentLog);
+  const folder = path.dirname(currentLog);
+  if (path.dirname(out.report) !== folder || path.dirname(out.csv) !== folder) return null;
+  await writeFile(out.report, report);
+  await writeFile(out.csv, csv);
+  return out;
 });
 
 ipcMain.handle("theme:set", (_event, source: unknown) => {
