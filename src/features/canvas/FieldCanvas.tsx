@@ -12,6 +12,7 @@ import {
   round1, shownHeading, updatePoint, updatePointParams, wrapDeg, type Arrival, type PointStart,
 } from '../../editor/pathOps';
 import { TARGETS, targetById, type Target } from '../../editor/targets';
+import { LEAD_IN_GAP } from '../../editor/codegen';
 import { drawField } from './fieldArt';
 
 /** Another path of the auton, drawn under (or, in the auton view, as) the paths you see. */
@@ -472,6 +473,25 @@ export function FieldCanvas(props: Props) {
     if (autonView && steps[0]?.def.points.length) {
       const a0 = arrivalsOf(steps[0].def)[0];
       drawRobot(ctx, a0.x, a0.y, a0.theta, false, true);
+    }
+    // the move into each following path's point 0, from where the path before left the robot (run() drives it)
+    let end: { x: number; y: number } | null = null;
+    for (const s of steps) {
+      const arr = arrivalsOf(s.def);
+      if (end && arr.length && !s.def.resetPose && Math.hypot(arr[0].x - end.x, arr[0].y - end.y) > LEAD_IN_GAP) {
+        const hot = s.step === hoverStep;
+        ctx.strokeStyle = s.step === activeStep ? C.path : autonView ? (hot ? C.fg : C.muted) : hot ? C.contextHot : C.context;
+        ctx.lineWidth = autonView ? (hot ? 2.25 : 1.5) : 1.25;
+        ctx.setLineDash([6, 4]);
+        const [ax, ay] = toScreen(end.x, end.y);
+        const [bx, by] = toScreen(arr[0].x, arr[0].y);
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if (arr.length) end = restOf(arr[arr.length - 1]);
     }
     for (const s of steps) {
       if (s.step === activeStep) continue;

@@ -13,6 +13,7 @@ export const CRIMSON_PROFILE: TeamProfile = {
     turnAcceleration: 1800,
     clawOffset: 6.3, // 16 cm
     goalOffset: 7.5,
+    timeoutLeeway: 100,
   },
   chassisNames: ["chassis"],
   mechanismTimes: {

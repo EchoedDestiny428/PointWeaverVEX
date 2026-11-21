@@ -15,6 +15,8 @@ import { targetById, where } from './targets';
  * (see arrivals in pathOps).
  * A slowdown drives the first part of the move, then cancels it and drives the rest at a lower max speed.
  * A heading can face the next point instead: turnToPoint, a donut (or moveToPose) to the heading that faces it.
+ * In an auton, every path after the first starts with a move to its point 0, unless the path before already left
+ * the robot there (or the path sets its own pose).
  * Timeouts nobody set come from the ghost (estimates); without any, LemLib-ish defaults.
  */
 
@@ -99,6 +101,8 @@ interface PathOpts {
   offsets: Offsets;
   estimates?: Estimates;
   mode: Mode;
+  /** the estimated timeout for a lead-in move, timed as a path of its own */
+  leadInEstimate?: (alone: PathDefinition) => number | undefined;
 }
 
 /** The body of one path: setPose (when asked) and the calls for every point after point 0. */
@@ -208,6 +212,52 @@ export function pathCode(name: string, def: PathDefinition, opts: CodeOptions): 
   return [`// ${name}, made in PointWeaver.`, FRAME_NOTE, '', ...fn(cppName(name), body)].join('\n') + '\n';
 }
 
+/** Where a path leaves the robot (after any reset or donut), and which way it faces. */
+function endOf(view: PathDefinition, offsets: Offsets): Pose | null {
+  const arr = arrivals(view, offsets);
+  const last = arr.at(-1);
+  if (!last) return null;
+  const at = restOf(last);
+  return { x: at.x, y: at.y, theta: last.final };
+}
+
+/** Closer than this (in) to where the path before left it, the robot is already at a path's start. */
+export const LEAD_IN_GAP = 1;
+
+/**
+ * The move to point 0 of a path that follows another in an auton, or nothing when the robot is already there (or
+ * the path sets its own pose). It uses point 0's heading (moveToPose) and settings. Its timeout, unless point 0 sets
+ * one, is the ghost's estimate for that one move.
+ */
+function leadIn(from: Pose | null, view: PathDefinition, step: number, opts: PathOpts & { label?: string }): Line[] {
+  const p0 = view.points[0];
+  if (!from || !p0 || view.resetPose) return [];
+  const a0 = arrivals(view, opts.offsets)[0];
+  if (Math.hypot(a0.x - from.x, a0.y - from.y) <= LEAD_IN_GAP) return [];
+  const r = resolveParams(view.params, p0.params);
+  const pose = p0.theta != null;
+  let ms = MEASURE_TIMEOUT;
+  if (opts.mode !== 'measure') {
+    // time it on its own: from where the robot is to point 0
+    const alone: PathDefinition = {
+      params: view.params,
+      points: [{ x: from.x, y: from.y, theta: from.theta }, { x: a0.x, y: a0.y, theta: pose ? a0.theta : null, params: p0.params }],
+    };
+    ms = r.timeout ?? opts.leadInEstimate?.(alone) ?? DEFAULTS.timeout;
+  }
+  const to = opts.map({ x: a0.x, y: a0.y, theta: a0.theta });
+  const rest = params([
+    ['forwards', r.reverse ? 'false' : null],
+    ['maxSpeed', r.maxSpeed !== 127 ? num(r.maxSpeed) : null],
+    ['minSpeed', r.minSpeed !== 0 ? num(r.minSpeed) : null],
+    ['earlyExitRange', r.earlyExitRange !== 0 ? num(r.earlyExitRange) : null],
+  ]);
+  const text = pose
+    ? `chassis.moveToPose(${num(to.x)}, ${num(to.y)}, ${num(wrapDeg(to.theta))}, ${num(ms)}${rest});`
+    : `chassis.moveToPoint(${num(to.x)}, ${num(to.y)}, ${num(ms)}${rest});`;
+  return [{ text: opts.label ? `${text} // to the start of ${opts.label}` : text, source: { step, point: 0, call: 'move' } }];
+}
+
 /**
  * A whole auton: a function for every path it uses (one more, ending in _rot180, for a path it also uses turned
  * around), then run(), which sets the start pose and calls them in order.
@@ -230,6 +280,7 @@ export function autonCode(name: string, auton: AutonDefinition, paths: Record<st
   const out: string[] = [`// ${name}, made in PointWeaver.`, FRAME_NOTE];
   const written = new Set<string>();
   const calls: string[] = [];
+  let at: Pose | null = null; // where the paths so far leave the robot
   auton.steps.forEach((step, k) => {
     const def = paths[step.path];
     if (!def) {
@@ -237,7 +288,13 @@ export function autonCode(name: string, auton: AutonDefinition, paths: Record<st
       return;
     }
     const id = `${nameOf(step.path)}${step.rotate ? '_rot180' : ''}`;
+    const view = stepView(def, step);
+    calls.push(...leadIn(at, view, k, {
+      setPose: false, map: identity, offsets: opts, mode: 'code', label: `${id}()`,
+      leadInEstimate: alone => opts.estimates?.(alone)?.get('1:move'),
+    }).map(l => l.text));
     calls.push(`${id}();`);
+    at = endOf(view, opts) ?? at;
     if (written.has(id)) return;
     written.add(id);
     // the auton's start pose is set in run(), so the first step's own setPose (if any) stays in its function
@@ -275,14 +332,20 @@ export function flatProgram(
   opts: CodeOptions & { measure?: boolean },
 ): { code: string; sources: Map<number, LineSource> } {
   const lines: Line[] = [];
+  let at: Pose | null = null; // where the steps so far leave the robot
   steps.forEach((s, k) => {
-    lines.push(...pathLines(stepView(s.def, s), k, {
+    const view = stepView(s.def, s);
+    const pathOpts: PathOpts = {
       setPose: k === 0 || !!s.def.resetPose,
       map,
       offsets: opts,
       estimates: opts.estimates?.(s.def),
       mode: opts.measure ? 'measure' : 'ghost',
-    }));
+      leadInEstimate: alone => opts.estimates?.(alone)?.get('1:move'),
+    };
+    if (k > 0) lines.push(...leadIn(at, view, k, pathOpts));
+    lines.push(...pathLines(view, k, pathOpts));
+    at = endOf(view, opts) ?? at;
   });
   const sources = new Map<number, LineSource>();
   const code = ['void run() {'];

@@ -32,7 +32,8 @@ const goals: Goal[] = [
 const loaders: Loader[] = [-1, 1].flatMap((sx) =>
   [-1, 1].map((sy) => ({
     id: `loader-${sx < 0 ? "red" : "blue"}-${sy < 0 ? "bottom" : "top"}`,
-    position: at(sx * 1740, sy * 1490),
+    // against the side wall, centred 12 in from the end wall (1500 mm from the centre line = 60 in)
+    position: at(sx * 1740, sy * 1500),
     width: 3,
     height: 4.6,
     alliance: sx < 0 ? ("red" as const) : ("blue" as const),

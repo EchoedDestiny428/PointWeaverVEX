@@ -89,7 +89,7 @@ export function Inspector({
         <div className="pad stack">
           <div className="grid-2">
             <NumberField label="Timeout" suffix="ms" step={100} nullable value={pp.timeout} placeholder="auto"
-              title="Every move's timeout. Empty: each move's own estimate from the ghost (its time plus a quarter, plus 100 ms)."
+              title="Every move's timeout. Empty: each move's own estimate from the ghost (its time plus a quarter, plus the leeway set under Robot)."
               onChange={v => setPath({ timeout: positive(v) }, 'path-timeout')} />
             <NumberField label="Turn timeout" suffix="ms" step={100} nullable value={pp.turnTimeout} placeholder="auto"
               title="Every turn's and donut's timeout. Empty: each one's estimate from the ghost."
@@ -154,6 +154,7 @@ export function Inspector({
   );
 
   if (i === 0) {
+    const start = point.params ?? {};
     return (
       <div className="inspector scroll">
         <div className="section-head">
@@ -172,8 +173,31 @@ export function Inspector({
           <span className="hint">
             Where the path starts. The robot drives to the points after it.
             {auton?.first ? ' The auton sets its pose here.' : path.resetPose ? ' The path sets the pose here.' : ''}
+            {auton && !auton.first && !path.resetPose
+              ? ' After the path before it, the robot drives here first (unless it\'s already within 1 in).' : ''}
           </span>
         </div>
+        {auton && !auton.first && !path.resetPose && (
+          <>
+            <div className="section-head sub">
+              <span>Move here <b className="count call-name">{point.theta != null ? 'moveToPose' : 'moveToPoint'}</b></span>
+            </div>
+            <div className="pad stack">
+              <div className="grid-2">
+                <NumberField label="Timeout" suffix="ms" step={100} nullable value={start.timeout} placeholder={show(pp.timeout, 'auto')}
+                  title="Empty: the ghost's time for this move, plus the leeway"
+                  onChange={v => update(updatePointParams(path, 0, { timeout: positive(v) }), 'pt-0-timeout')} />
+                <NumberField label="Max" suffix="/127" step={5} nullable value={start.maxSpeed} placeholder={show(pp.maxSpeed, 127)}
+                  onChange={v => update(updatePointParams(path, 0, { maxSpeed: speed(v) }), 'pt-0-max')} />
+              </div>
+              <div className="row-between" title="Drive backwards to the start (forwards = false)">
+                <span className="field-label">Reverse</span>
+                <Toggle checked={resolveParams(pp, start).reverse} title="Drive backwards"
+                  onChange={v => update(updatePointParams(path, 0, { reverse: v ? true : null }), 'pt-0-reverse')} />
+              </div>
+            </div>
+          </>
+        )}
       </div>
     );
   }
@@ -191,7 +215,9 @@ export function Inspector({
     show(given, est(call) ?? fallback);
   const estHint = (call: 'move' | 'slow' | 'turn') => {
     const e = est(call);
-    return e != null ? `Empty: ${e} ms, the ghost's time plus a quarter, plus 100 ms` : 'Empty: no estimate (the ghost never finishes it)';
+    return e != null
+      ? `Empty: ${e} ms, the ghost's time plus a quarter, plus the leeway (Robot)`
+      : 'Empty: no estimate (the ghost never finishes it)';
   };
 
   return (

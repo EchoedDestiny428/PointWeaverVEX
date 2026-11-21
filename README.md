@@ -40,6 +40,8 @@ The app isn't code-signed, so Windows may say *"Windows protected your PC"*. Cli
 7. Open the auton in the sidebar to see all of its paths. Add a path you already have with **+** in the auton's path list, or drag it in from **Paths** on the left. Click ↻ on a path to turn that use 180° about the field centre. The goals are placed point-symmetrically, so a move made on blue's half works the same way on red's half.
 8. Open **Output code** and click the copy button.
 
+Every path after the first starts by driving to its point 0, from wherever the path before it left the robot. That's a `moveToPoint` in `run()`, or a `moveToPose` if point 0 has a heading. It's skipped when the robot is already within 1 in, or when the path has **Set pose at start** on. Its timeout, speed and reverse are on point 0 of that path (open it from the auton).
+
 Editing a path changes it in every auton that uses it, including the turned uses. You can edit a turned use where it sits on the field. The sidebar shows how many times each path is used.
 
 | Control | Action |
@@ -88,7 +90,7 @@ void run() {
 
 Settings that are left at LemLib's default stay out of the call. Each point can set **Timeout** (ms), **Exit** (`earlyExitRange`, in), **Max** and **Min** speed (0–127) and **Reverse** (`forwards = false`). Leave a box empty to use the path's default. Set the path's defaults with no point selected.
 
-**Timeouts are estimated.** A timeout box left empty (on the point and the path) shows a greyed number: the ghost's time for that call, plus a quarter, plus 100 ms, rounded up to 50 ms. That's what the code uses. Type a number to override it.
+**Timeouts are estimated.** A timeout box left empty (on the point and the path) shows a greyed number: the ghost's time for that call, plus a quarter, plus **Leeway** (under **Robot**, 100 ms to start with), rounded up to 50 ms. That's what the code uses. Type a number to override it.
 
 A goal, a pin and a slowdown look like this:
 

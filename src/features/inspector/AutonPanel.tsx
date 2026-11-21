@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { AutonDefinition, PathDefinition } from '../../editor/types';
 import type { HistoryMode } from '../../hooks/useLibrary';
-import { arrivals, stepGap, stepView, type Offsets } from '../../editor/pathOps';
+import { arrivals, stepView, type Offsets } from '../../editor/pathOps';
 import { Icon, IconButton } from '../../components/Icon';
 import { MenuButton } from '../../components/Menu';
 import { Toggle } from '../../components/Controls';
@@ -63,9 +63,8 @@ export function AutonPanel({
       <div className="list scroll points" onMouseLeave={() => onHoverStep(null)}>
         {steps.map((s, k) => {
           const def = paths[s.path];
-          const gap = stepGap(auton, paths, k, offsets);
-          const warn = !def ? `"${s.path}" is missing` : gap != null && gap > 1
-            ? `Starts ${fmt(gap)} in from where path ${k} ends` : timeoutSteps.includes(k) ? 'A move times out in the ghost' : null;
+          // (a path that starts away from where the one before ends is driven to: run() moves to its point 0)
+          const warn = !def ? `"${s.path}" is missing` : timeoutSteps.includes(k) ? 'A move times out in the ghost' : null;
           return (
             <div key={k}
               draggable

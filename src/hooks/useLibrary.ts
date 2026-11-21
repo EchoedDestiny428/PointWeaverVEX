@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AutonDefinition, Library, PathDefinition } from '../editor/types';
 import { NAME_RE } from '../editor/types';
 import { rotate180 } from '../editor/pathOps';
+import { targetById } from '../editor/targets';
 import { store, type DocKind, type Settings } from '../editor/store';
 import { CRIMSON_PROFILE } from '../profiles/crimson';
 import type { RobotConfig } from '../robot/config';
@@ -52,7 +53,16 @@ function cleanPath(raw: unknown): PathDefinition {
   const d = (raw ?? {}) as Partial<PathDefinition>;
   return {
     ...d,
-    points: Array.isArray(d.points) ? d.points.filter(p => Number.isFinite(p?.x) && Number.isFinite(p?.y)) : [],
+    points: Array.isArray(d.points)
+      ? d.points
+        .filter(p => Number.isFinite(p?.x) && Number.isFinite(p?.y))
+        // a snapped point sits on its spot, wherever the field model now puts it (an unknown spot is dropped)
+        .map(p => {
+          if (!p.target) return p;
+          const t = targetById(p.target);
+          return t ? { ...p, x: t.x, y: t.y } : { ...p, target: null };
+        })
+      : [],
     params: d.params ?? null,
   };
 }

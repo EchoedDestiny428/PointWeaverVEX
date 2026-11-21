@@ -52,8 +52,9 @@ const run = (code: string, robot: RobotConfig, periodSeconds: number) => {
   });
 };
 
-/** A suggested timeout from a call's ghost time: a quarter more, plus 100 ms, rounded up to 50 ms. */
-export const estimateFromSeconds = (seconds: number) => Math.ceil((seconds * 1000 * 1.25 + 100) / 50) * 50;
+/** A suggested timeout from a call's ghost time: a quarter more, plus the leeway (ms), rounded up to 50 ms. */
+export const estimateFromSeconds = (seconds: number, leeway = 100) =>
+  Math.ceil((seconds * 1000 * 1.25 + Math.max(0, leeway)) / 50) * 50;
 
 const estimateCache = new WeakMap<PathDefinition, { robot: RobotConfig; estimates: Estimates }>();
 
@@ -74,7 +75,7 @@ export function estimatesFor(def: PathDefinition, robot: RobotConfig): Estimates
       const src = sources.get(e.line);
       if (e.kind !== 'motion' || !src || (e.status !== 'done' && e.status !== 'cancelled')) continue;
       if (src.call !== 'move' && src.call !== 'slow' && src.call !== 'turn') continue;
-      estimates.set(estimateKey(src.point, src.call), estimateFromSeconds(e.end - e.start));
+      estimates.set(estimateKey(src.point, src.call), estimateFromSeconds(e.end - e.start, robot.timeoutLeeway));
     }
   }
   estimateCache.set(def, { robot, estimates });

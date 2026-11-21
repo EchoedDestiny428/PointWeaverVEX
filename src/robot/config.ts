@@ -10,6 +10,8 @@ export interface RobotConfig {
   clawOffset: number;
   /** robot centre to the centre of the goal it's on (in): where a goal reset puts the robot, and the donut's pivot */
   goalOffset: number;
+  /** ms added to every estimated timeout (after the extra quarter) */
+  timeoutLeeway: number;
 }
 
 export const ROBOT_FIELDS: Array<{ key: keyof RobotConfig; label: string; unit: string; min: number; max: number; step: number }> = [
@@ -22,4 +24,5 @@ export const ROBOT_FIELDS: Array<{ key: keyof RobotConfig; label: string; unit: 
   { key: "turnAcceleration", label: "Turn acceleration", unit: "°/s²", min: 200, max: 6000, step: 50 },
   { key: "clawOffset", label: "Claw offset (robot centre to claw centre)", unit: "in", min: 0, max: 15, step: 0.1 },
   { key: "goalOffset", label: "Goal offset (robot centre to the centre of the goal it's on)", unit: "in", min: 0, max: 15, step: 0.1 },
+  { key: "timeoutLeeway", label: "Estimated timeout leeway (added to every estimate)", unit: "ms", min: 0, max: 3000, step: 50 },
 ];

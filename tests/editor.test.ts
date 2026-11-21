@@ -59,6 +59,11 @@ describe('path operations', () => {
     expect(targetById('goal-red-3')).toMatchObject({ x: 96, y: 120 });
     expect(targetById('cup-yellow-2')).toMatchObject({ kind: 'pin', x: 48, y: 48 });
     expect(targetById('loader-red-top')?.x).toBeGreaterThan(140);
+    // loaders sit against the side wall, centred 12 in from the end wall
+    const blue = targetById('loader-blue-top')!;
+    const red = targetById('loader-red-bottom')!;
+    expect(blue.kind).toBe('loader');
+    expect([blue.x, blue.y, red.x, red.y].map(v => Math.round(v * 100) / 100)).toEqual([2.4, 12, 141.6, 132]);
     expect(mirrorTarget('goal-blue-2')).toBe('goal-red-2');
     expect(mirrorTarget('goal-1a')).toBe('goal-1b');
     expect(mirrorTarget('cup-pin-top')).toBe('cup-pin-bottom');
@@ -228,6 +233,47 @@ describe('code', () => {
     });
   });
 
+  describe('paths after the first in an auton', () => {
+    const a = path([{ x: 18, y: 72, theta: 0 }, { x: 48, y: 72 }]);
+    const b = path([{ x: 60, y: 96, theta: 90 }, { x: 60, y: 120 }]);
+
+    it('drive to their point 0 first', () => {
+      const code = autonCode('A', { steps: [{ path: 'a' }, { path: 'b' }] }, { a, b }, opts);
+      expect(code).toContain([
+        'void run() {',
+        '    chassis.setPose(18, 72, 0);',
+        '    a();',
+        '    chassis.moveToPose(60, 96, 90, 2000); // to the start of b()',
+        '    b();',
+        '}',
+      ].join('\n'));
+    });
+
+    it("don't when the robot is already there, or the path sets its own pose", () => {
+      const near = path([{ x: 48.5, y: 72 }, { x: 60, y: 72 }]);
+      expect(autonCode('A', { steps: [{ path: 'a' }, { path: 'near' }] }, { a, near }, opts)).toContain('    a();\n    near();');
+      const own = { ...b, resetPose: true };
+      expect(autonCode('A', { steps: [{ path: 'a' }, { path: 'own' }] }, { a, own }, opts)).toContain('    a();\n    own();');
+    });
+
+    it("use point 0's settings and the ghost's estimate", () => {
+      const back = path([{ x: 60, y: 96, params: { reverse: true, maxSpeed: 80 } }, { x: 60, y: 120 }]);
+      const code = autonCode('A', { steps: [{ path: 'a' }, { path: 'back' }] }, { a, back },
+        { ...opts, estimates: def => estimatesFor(def, robot) });
+      expect(code).toMatch(/ {4}chassis\.moveToPoint\(60, 96, \d+, \{\.forwards = false, \.maxSpeed = 80\}\); \/\/ to the start of back\(\)/);
+      expect(code).not.toContain('chassis.moveToPoint(60, 96, 2000');
+    });
+
+    it('are driven in the ghost', () => {
+      const { sources, code } = flatProgram([{ def: a }, { def: b }], p => p, opts);
+      const line = code.split('\n').findIndex(l => l.includes('moveToPose(60, 96, 90')) + 1;
+      expect(sources.get(line)).toEqual({ step: 1, point: 0, call: 'move' });
+      const ghost = simulateSteps([{ def: a }, { def: b }], robot, 15);
+      expect(ghost.timeouts).toEqual([]);
+      expect(ghost.poses.some(q => Math.hypot(q.x - 60, q.y - 96) < 1.5)).toBe(true);
+    });
+  });
+
   it("leaves crimson::DonutParams' default speeds out", () => {
     const p = path([{ x: 18, y: 72, theta: 0 }, { x: 24, y: 48, target: 'goal-blue-2', theta: 90, action: 'donut' }]);
     expect(pathCode('p', p, opts)).toContain('    chassis.donut(90, 1000);');
@@ -276,7 +322,8 @@ describe('code', () => {
     const code = autonCode('A', { steps: [{ path: 'a b' }, { path: 'a_b' }, { path: 'a b', rotate: true }] }, { 'a b': p, a_b: p }, opts);
     expect(code).toContain('void a_b() {');
     expect(code).toContain('void a_b_2() {');
-    expect(code).toContain('    a_b();\n    a_b_2();\n    a_b_rot180();');
+    // (with moves between them: these paths don't start where the one before ends)
+    expect(code.split('\n').filter(l => /^ {4}\w+\(\);$/.test(l))).toEqual(['    a_b();', '    a_b_2();', '    a_b_rot180();']);
   });
 
   it('writes an empty run() for an empty auton', () => {
@@ -296,9 +343,17 @@ describe('code', () => {
 });
 
 describe('estimated timeouts', () => {
-  it('rounds a call time up into a timeout', () => {
+  it('rounds a call time up into a timeout, with the leeway', () => {
     expect(estimateFromSeconds(1)).toBe(1350);
     expect(estimateFromSeconds(0.2)).toBe(350);
+    expect(estimateFromSeconds(1, 300)).toBe(1550);
+    expect(estimateFromSeconds(1, 0)).toBe(1250);
+  });
+
+  it('takes the leeway from the robot settings', () => {
+    const p = path([{ x: 18, y: 72, theta: 0 }, { x: 60, y: 72 }]);
+    const base = estimatesFor(p, robot).get('1:move')!;
+    expect(estimatesFor(p, { ...robot, timeoutLeeway: 600 }).get('1:move')).toBe(base + 500);
   });
 
   it('times every call in the ghost and uses that when no timeout is set', () => {
@@ -381,7 +436,7 @@ describe('ghost', () => {
       { x: 18, y: 84, theta: -90 },
       { x: 48, y: 48, target: 'cup-yellow-2' },
       { x: 24, y: 48, target: 'goal-blue-2', theta: 180, action: 'donut', params: { reverse: true } },
-      { x: 2.4, y: 12.4, target: 'loader-blue-top', params: { slowdown: 0.3, slowSpeed: 40 } },
+      { x: 2.4, y: 12, target: 'loader-blue-top', params: { slowdown: 0.3, slowSpeed: 40 } },
     ]);
     expect(simulateSteps([{ def }], CRIMSON_PROFILE.robot, 15).timeouts).toEqual([]);
     expect(estimatesFor(def, robot).get('3:slow')).toBeLessThan(2000);
