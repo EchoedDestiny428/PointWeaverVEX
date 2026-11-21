@@ -597,3 +597,14 @@ button.crumb:hover {
 .sub-row:hover .rot {
   display: none;
 }
+
+/* the toolbar clock: playhead / total */
+.toolbar .time .now {
+  min-width: 2.2em;
+  text-align: right;
+  color: var(--text);
+}
+
+.toolbar .time .of {
+  color: var(--faint);
+}

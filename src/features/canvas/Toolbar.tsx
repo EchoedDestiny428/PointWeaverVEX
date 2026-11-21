@@ -17,6 +17,22 @@ interface Props {
   onSave: () => void;
 }
 
+/** The playhead's time, following playback without re-rendering React every frame. */
+function Now({ playback }: { playback: Playback }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const { timeRef, ghost } = playback;
+  useEffect(() => {
+    let raf = 0;
+    const loop = () => {
+      if (ref.current) ref.current.textContent = Math.min(timeRef.current, ghost.duration).toFixed(1);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [timeRef, ghost]);
+  return <span ref={ref} className="now">0.0</span>;
+}
+
 function Scrubber({ playback }: { playback: Playback }) {
   const fillRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
@@ -71,6 +87,8 @@ export function Toolbar({ playback, limit, timeouts, dirty, editing, onAdd, onRo
       <Scrubber playback={playback} />
       <span className={`time ${warn ? 'warn' : ''}`} title={title}>
         {warn && <Icon name="warn" size={13} />}
+        <Now playback={playback} />
+        <span className="of">/</span>
         {`${ghost.duration.toFixed(1)}s`}
       </span>
       <span className="sep" />
