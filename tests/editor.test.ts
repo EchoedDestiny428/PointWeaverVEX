@@ -7,7 +7,7 @@ import { mirrorTarget, targetById } from '../src/editor/targets';
 import type { AutonDefinition, PathDefinition } from '../src/editor/types';
 
 const robot = CRIMSON_PROFILE.robot;
-const opts: CodeOptions = { clawOffset: 6.3 };
+const opts: CodeOptions = { clawOffset: 6.3, goalOffset: 7.5 };
 
 const path = (points: PathDefinition['points'], extra: Partial<PathDefinition> = {}): PathDefinition => ({
   points,
@@ -50,8 +50,8 @@ describe('path operations', () => {
   it('measures the gap between steps', () => {
     const paths = { a: path([{ x: 0, y: 0 }, { x: 10, y: 0 }]), b: path([{ x: 10, y: 3 }, { x: 20, y: 0 }]) };
     const auton: AutonDefinition = { steps: [{ path: 'a' }, { path: 'b' }] };
-    expect(stepGap(auton, paths, 0)).toBeNull();
-    expect(stepGap(auton, paths, 1)).toBeCloseTo(3);
+    expect(stepGap(auton, paths, 0, opts)).toBeNull();
+    expect(stepGap(auton, paths, 1, opts)).toBeCloseTo(3);
   });
 
   it('places goals, pins and loaders in the Crimson frame and pairs them across the field', () => {
@@ -76,15 +76,37 @@ describe('path operations', () => {
 
   it('stops short of a pin so the claw is on it', () => {
     // driving straight at it along +X: the centre stops one claw offset before it
-    const straight = arrivals(path([{ x: 18, y: 48, theta: 0 }, { x: 48, y: 48, target: 'cup-yellow-2' }]), 6.3);
+    const straight = arrivals(path([{ x: 18, y: 48, theta: 0 }, { x: 48, y: 48, target: 'cup-yellow-2' }]), opts);
     expect(straight[1].x).toBeCloseTo(41.7);
     expect(straight[1].y).toBeCloseTo(48);
     // arriving at heading -90 (facing +Y): the centre is below the pin
-    const posed = arrivals(path([{ x: 18, y: 30, theta: 0 }, { x: 48, y: 48, theta: -90, target: 'cup-yellow-2' }]), 6.3);
+    const posed = arrivals(path([{ x: 18, y: 30, theta: 0 }, { x: 48, y: 48, theta: -90, target: 'cup-yellow-2' }]), opts);
     expect(posed[1].x).toBeCloseTo(48);
     expect(posed[1].y).toBeCloseTo(41.7);
     // goals take the centre all the way in
-    expect(arrivals(path([{ x: 18, y: 48 }, { x: 24, y: 48, target: 'goal-blue-2' }]), 6.3)[1]).toMatchObject({ x: 24, y: 48 });
+    expect(arrivals(path([{ x: 18, y: 48 }, { x: 24, y: 48, target: 'goal-blue-2' }]), opts)[1]).toMatchObject({ x: 24, y: 48 });
+  });
+
+  it('puts the robot goalOffset out from a goal after the reset, on the side it came in', () => {
+    // driving +X into the goal: it ends 7.5 in short of the centre, facing it
+    const fwd = arrivals(path([{ x: 0, y: 48 }, { x: 24, y: 48, target: 'goal-blue-2' }]), opts)[1];
+    expect(fwd.rest!.x).toBeCloseTo(16.5);
+    expect(fwd.rest!.y).toBeCloseTo(48);
+    // backing in from above: still on the side it came from
+    const back = arrivals(path([{ x: 24, y: 80 }, { x: 24, y: 48, target: 'goal-blue-2', params: { reverse: true } }]), opts)[1];
+    expect(back.rest!.x).toBeCloseTo(24);
+    expect(back.rest!.y).toBeCloseTo(55.5);
+    // no reset, no rest spot
+    const off = arrivals(path([{ x: 0, y: 48 }, { x: 24, y: 48, target: 'goal-blue-2', params: { goalReset: false } }]), opts)[1];
+    expect(off.rest).toBeUndefined();
+  });
+
+  it("measures the gap between steps from where a goal reset leaves the robot", () => {
+    const paths = {
+      a: path([{ x: 0, y: 48 }, { x: 24, y: 48, target: 'goal-blue-2' }]),
+      b: path([{ x: 16.5, y: 48 }, { x: 16.5, y: 80 }]),
+    };
+    expect(stepGap({ steps: [{ path: 'a' }, { path: 'b' }] }, paths, 1, opts)).toBeCloseTo(0);
   });
 });
 
@@ -109,7 +131,7 @@ describe('code', () => {
       '    chassis.turnToHeading(180, 800, {.direction = lemlib::AngularDirection::CW_CLOCKWISE});',
       '    chassis.moveToPoint(48, 24, 1500, {.forwards = false}); // blue goal 3',
       '    chassis.waitUntilDone();',
-      '    chassis.setPoseFromGoal(48, 24);',
+      '    chassis.setPoseFromGoal(48, 24, {.distance = 7.5});',
       '    chassis.donut(90, 1000, {.forwards = false, .fastSpeed = 127, .slowSpeed = 30});',
       '}',
       '',
@@ -127,7 +149,7 @@ describe('code', () => {
     expect(code).toContain('    chassis.moveToPoint(30, 72, 2000);\n    chassis.turnToHeading(90, 1000);');
     expect(code).toContain('    chassis.moveToPoint(24, 48, 2000); // blue goal 2\n    chassis.moveToPoint(30, 30, 2000); // blue goal 2');
     // driving forwards into a goal puts it in front of the robot
-    expect(code).toContain('    chassis.waitUntilDone();\n    chassis.setPoseFromGoal(24, 48, {.forwards = true});');
+    expect(code).toContain('    chassis.waitUntilDone();\n    chassis.setPoseFromGoal(24, 48, {.forwards = true, .distance = 7.5});');
     expect(code.match(/setPoseFromGoal/g)).toHaveLength(1);
   });
 
@@ -193,8 +215,8 @@ describe('code', () => {
     expect(sources.get(2)).toEqual({ step: 0, point: 0, call: 'pose' });
     expect(sources.get(5)).toEqual({ step: 0, point: 3, call: 'move' });
     expect(sources.get(6)).toEqual({ step: 0, point: 3, call: 'turn' });
-    // the ghost doesn't reset at goals, so its trail stays drawn into the goal
-    expect(code).not.toContain('setPoseFromGoal');
+    // the ghost resets at goals too, so it jumps back out to where the robot really is
+    expect(code).toContain('setPoseFromGoal');
   });
 });
 
@@ -217,7 +239,7 @@ describe('estimated timeouts', () => {
     }
     // cached for the same path and robot
     expect(estimatesFor(p, robot)).toBe(est);
-    const code = pathCode('p', p, { clawOffset: 6.3, estimates: def => estimatesFor(def, robot) });
+    const code = pathCode('p', p, { ...opts, estimates: def => estimatesFor(def, robot) });
     expect(code).toContain(`    chassis.moveToPoint(60, 72, ${est.get('1:move')});`);
     expect(code).toContain(`    chassis.turnToHeading(90, ${est.get('1:turn')});`);
     // a timeout you typed wins
@@ -264,6 +286,18 @@ describe('ghost', () => {
     expect(ghost.timeouts).toEqual([{ step: 0, point: 1, call: 'move' }]);
   });
 
+  it('donuts around the goal it reset against', () => {
+    const def = path([
+      { x: 60, y: 72, theta: 0 },
+      { x: 24, y: 48, target: 'goal-blue-2', theta: 90, action: 'donut', params: { reverse: true } },
+    ]);
+    const ghost = simulateSteps([{ def }], CRIMSON_PROFILE.robot, 15);
+    const end = poseAt(ghost, ghost.duration)!;
+    // turned to the heading, still 7.5 in from the goal's centre
+    expect(Math.abs(wrapDeg(end.theta - 90))).toBeLessThan(5);
+    expect(Math.hypot(end.x - 24, end.y - 48)).toBeCloseTo(7.5, 0);
+  });
+
   it("doesn't stall when a move ends a little beside its target", () => {
     // the slow part arrives at an angle and stops 0.8 in off; LemLib's large-error exit ends it
     const def = path([
@@ -284,8 +318,14 @@ describe('ghost', () => {
     ]);
     const ghost = simulateSteps([{ def }], CRIMSON_PROFILE.robot, 15);
     expect(ghost.timeouts).toEqual([]);
+    // into the goal, then the reset puts it 7.5 in back out, on the side it came from
+    expect(ghost.jumps).toHaveLength(1);
+    const k = ghost.jumps[0];
+    expect(Math.hypot(ghost.poses[k - 1].x - 24, ghost.poses[k - 1].y - 48)).toBeLessThan(2);
+    const rest = arrivals(def, robot)[2].rest!;
     const end = poseAt(ghost, ghost.duration)!;
-    expect(Math.hypot(end.x - 24, end.y - 48)).toBeLessThan(2);
+    expect(Math.hypot(end.x - rest.x, end.y - rest.y)).toBeLessThan(1.5);
+    expect(Math.hypot(end.x - 24, end.y - 48)).toBeCloseTo(7.5, 0);
     // slower over the last half of the first move than before it
     const fast = ghost.poses.filter(p => p.x > 30 && p.x < 36 && Math.abs(p.y - 72) < 2);
     const slow = ghost.poses.filter(p => p.x > 48 && p.x < 54 && Math.abs(p.y - 72) < 2);

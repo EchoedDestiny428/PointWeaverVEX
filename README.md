@@ -26,7 +26,7 @@ The app isn't code-signed, so Windows may say *"Windows protected your PC"*. Cli
 3. Double-click the field to add points. Point 0 is where the path starts, and the robot drives to each point after it.
    While you drag a point, the robot is drawn where that point puts it, in red if it would hit the wall.
 4. The goals, pins and loaders glow. Drag or double-click a point near one and it snaps there (hold **Ctrl** to place it freely):
-   - **Goal**: the robot's centre drives to the goal's centre. It clips into the goal, so the code then waits and calls `chassis.setPoseFromGoal` (you can switch that off per point).
+   - **Goal**: the robot's centre drives to the goal's centre. It clips into the goal, so the code then waits and calls `chassis.setPoseFromGoal` with `.distance` set to **Goal** (7.5 in, robot centre to goal centre, under **Robot**). That puts the robot back where it really is, against the goal. You can switch the reset off per point. The ghost does the same reset, so it jumps back out of the goal (a dashed hop on the field), and the next move starts from there. A donut orbits the goal at that distance.
    - **Pin or loader**: the robot stops where its claw's centre is on the spot. That's **Claw** (16 cm = 6.3 in) in front of the robot's centre, set under **Robot**. The robot faces the point's heading, or else the way it drives in.
 5. Click a point to edit it on the right. Turn its heading on, then choose what happens there:
    - **Drive into**: `chassis.moveToPose`, arriving at that heading.
@@ -60,7 +60,7 @@ Editing a path changes it in every auton that uses it, including the turned uses
 
 The toolbar shows the ghost's run time. It turns bold with a ⚠ when the run is over the limit (15 s, or 60 s with **Skills** on), or when a move hits its timeout. That point gets a dashed ring.
 
-**Robot** (bottom left) sets the ghost's size and speed, and the claw offset. Only the claw offset changes the code.
+**Robot** (bottom left) sets the ghost's size and speed, and the claw and goal offsets. Only the two offsets change the code.
 
 ## Output code
 
@@ -93,7 +93,7 @@ A goal, a pin and a slowdown look like this:
 ```cpp
 chassis.moveToPoint(24, 48, 1050, {.forwards = false}); // blue goal 2
 chassis.waitUntilDone();
-chassis.setPoseFromGoal(24, 48);
+chassis.setPoseFromGoal(24, 48, {.distance = 7.5});
 chassis.moveToPoint(43.97, 52.84, 1750); // claw on yellow pin (48, 48)
 chassis.moveToPoint(5.67, 17.79, 800); // claw on blue loader (2.4, 12.4)
 chassis.waitUntil(17.67);
@@ -101,7 +101,7 @@ chassis.cancelMotion();
 chassis.moveToPoint(5.67, 17.79, 650, {.maxSpeed = 40}); // last 50%
 ```
 
-The ghost skips `setPoseFromGoal`, so its trail stays drawn into the goal.
+`.distance` is passed every time because `crimson::Chassis` on its own uses 22 cm (back against the goal) or 15 cm (front).
 
 **Set pose at start** on a path adds a `chassis.setPose` at its point 0, for re-localising partway through an auton.
 

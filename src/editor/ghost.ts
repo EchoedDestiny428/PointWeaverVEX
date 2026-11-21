@@ -26,13 +26,15 @@ export interface GhostPose extends Pose {
 
 export interface Ghost {
   poses: GhostPose[];
+  /** pose indices k where the ghost jumps from poses[k - 1] to poses[k]: a goal reset putting it back out of the goal */
+  jumps: number[];
   /** s */
   duration: number;
   /** moves that hit their timeout: which step and point */
   timeouts: LineSource[];
 }
 
-export const EMPTY_GHOST: Ghost = { poses: [], duration: 0, timeouts: [] };
+export const EMPTY_GHOST: Ghost = { poses: [], jumps: [], duration: 0, timeouts: [] };
 
 /** Every simulated frame is kept up to this rate; the drawn trail and playback don't need more. */
 const KEEP_EVERY_S = 0.02;
@@ -64,7 +66,9 @@ export function estimatesFor(def: PathDefinition, robot: RobotConfig): Estimates
   if (hit && hit.robot === robot) return hit.estimates;
   const estimates = new Map<string, number>();
   if (def.points.length > 1) {
-    const { code, sources } = flatProgram([{ def }], toSimFrame, { clawOffset: robot.clawOffset, measure: true });
+    const { code, sources } = flatProgram([{ def }], toSimFrame, {
+      clawOffset: robot.clawOffset, goalOffset: robot.goalOffset, measure: true,
+    });
     const sim = run(code, robot, 300);
     for (const e of sim?.timeline ?? []) {
       const src = sources.get(e.line);
@@ -81,20 +85,26 @@ export function simulateSteps(steps: SimStep[], robot: RobotConfig, periodSecond
   if (!steps.some(s => s.def.points.length > 1)) return EMPTY_GHOST;
   const { code, sources } = flatProgram(steps, toSimFrame, {
     clawOffset: robot.clawOffset,
+    goalOffset: robot.goalOffset,
     estimates: def => estimatesFor(def, robot),
   });
   // let it run past the time limit so the whole path shows; the toolbar says when it's over
   const sim = run(code, robot, Math.max(periodSeconds * 4, 120));
   if (!sim) return EMPTY_GHOST;
 
+  // goal resets (not the start's setPose): the ghost jumps there, so the trail breaks instead of sliding
+  const resetTimes = sim.poseResets.filter(r => sources.get(r.line)?.call === 'reset').map(r => r.time);
   const every = Math.max(1, Math.round(KEEP_EVERY_S / sim.dt));
   const poses: GhostPose[] = [];
+  const jumps: number[] = [];
   const last = sim.frameCount - 1;
   for (let i = 0; i <= last; i += every) {
     const p = fromSimFrame({ x: sim.x[i], y: sim.y[i], theta: sim.theta[i] });
     const prev = poses.at(-1);
     const t = i * sim.dt;
-    const speed = prev ? Math.hypot(p.x - prev.x, p.y - prev.y) / (t - prev.t) : 0;
+    const jumped = !!prev && resetTimes.some(rt => rt > prev.t - 1e-9 && rt <= t + 1e-9);
+    if (jumped) jumps.push(poses.length);
+    const speed = prev && !jumped ? Math.hypot(p.x - prev.x, p.y - prev.y) / (t - prev.t) : 0;
     poses.push({ ...p, t, speed });
     if (i < last && i + every > last) i = last - every; // always keep the final frame
   }
@@ -102,7 +112,7 @@ export function simulateSteps(steps: SimStep[], robot: RobotConfig, periodSecond
   const timeouts = sim.timeline
     .filter(e => e.status === 'timeout' && sources.has(e.line))
     .map(e => sources.get(e.line)!);
-  return { poses, duration: poses.at(-1)?.t ?? 0, timeouts };
+  return { poses, jumps, duration: poses.at(-1)?.t ?? 0, timeouts };
 }
 
 /** The ghost's pose at time t (s), between frames. */
@@ -120,6 +130,7 @@ export function poseAt(ghost: Ghost, t: number): Pose | null {
   }
   const a = ps[lo];
   const b = ps[hi];
+  if (ghost.jumps.includes(hi)) return t < b.t ? a : b; // a reset: jump, don't slide
   const f = (t - a.t) / (b.t - a.t || 1);
   let dTheta = b.theta - a.theta;
   dTheta -= Math.round(dTheta / 360) * 360;

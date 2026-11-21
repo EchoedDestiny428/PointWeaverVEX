@@ -94,7 +94,7 @@ export default function App() {
 
   const robot = lib.robot;
   const code = useMemo(() => {
-    const opts = { clawOffset: robot.clawOffset, estimates: (def: PathDefinition) => estimatesFor(def, robot) };
+    const opts = { clawOffset: robot.clawOffset, goalOffset: robot.goalOffset, estimates: (def: PathDefinition) => estimatesFor(def, robot) };
     if (currentAutonName && currentAuton) return autonCode(currentAutonName, currentAuton, paths, opts);
     if (currentPathName && paths[currentPathName]) return pathCode(currentPathName, paths[currentPathName], opts);
     return '';
@@ -285,6 +285,7 @@ export default function App() {
             onNewPath={() => setNaming({ auton: currentAutonName })}
             duration={ghost.duration}
             timeoutSteps={stepTimeouts}
+            offsets={robot}
           />
         ) : editing ? (
           <>

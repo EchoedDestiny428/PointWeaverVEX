@@ -1,6 +1,6 @@
 import type { AutonDefinition, PathDefinition } from './types';
 import { DEFAULTS } from './types';
-import { actionOf, arrivals, resolveParams, stepView, wrapDeg, type ResolvedParams } from './pathOps';
+import { actionOf, arrivals, resolveParams, restOf, stepView, wrapDeg, type Offsets, type ResolvedParams } from './pathOps';
 import { targetById, where } from './targets';
 
 /**
@@ -11,7 +11,8 @@ import { targetById, where } from './targets';
  * is where the path starts, so it never makes a move; it sets the pose when the path (or the auton) starts there.
  *
  * A point at a goal sends the robot's centre to the goal's centre (it clips into the goal), then waits and resets
- * the pose from the goal. A point at a pin or loader stops where the claw is on it (see arrivals in pathOps).
+ * the pose from the goal, goalOffset out from its centre. A point at a pin or loader stops where the claw is on it
+ * (see arrivals in pathOps).
  * A slowdown drives the first part of the move, then cancels it and drives the rest at a lower max speed.
  * Timeouts nobody set come from the ghost (estimates); without any, LemLib-ish defaults.
  */
@@ -34,9 +35,7 @@ export type CallKind = 'pose' | 'move' | 'slow' | 'turn' | 'reset';
 export type Estimates = ReadonlyMap<string, number>;
 export const estimateKey = (point: number, call: 'move' | 'slow' | 'turn') => `${point}:${call}`;
 
-export interface CodeOptions {
-  /** robot centre to claw centre (in) */
-  clawOffset: number;
+export interface CodeOptions extends Offsets {
   /** the estimated timeouts for a path (as stored, before any turn) */
   estimates?: (def: PathDefinition) => Estimates | undefined;
 }
@@ -86,8 +85,8 @@ const direction = (d: ResolvedParams['turnDirection']) =>
   d === 'cw' ? 'lemlib::AngularDirection::CW_CLOCKWISE' : d === 'ccw' ? 'lemlib::AngularDirection::CCW_COUNTERCLOCKWISE' : null;
 
 /**
- * code: the output. ghost: for the simulator (no goal resets, so the ghost stays drawn into the goal).
- * measure: the simulator with long timeouts, to time every call for the estimates.
+ * code: the output. ghost: for the simulator. measure: the simulator with long timeouts, to time every call for the
+ * estimates.
  */
 type Mode = 'code' | 'ghost' | 'measure';
 
@@ -96,7 +95,7 @@ const MEASURE_TIMEOUT = 8000;
 interface PathOpts {
   setPose: boolean;
   map: FrameMap;
-  clawOffset: number;
+  offsets: Offsets;
   estimates?: Estimates;
   mode: Mode;
 }
@@ -105,7 +104,7 @@ interface PathOpts {
 function pathLines(def: PathDefinition, step: number, opts: PathOpts): Line[] {
   const lines: Line[] = [];
   const pts = def.points;
-  const arr = arrivals(def, opts.clawOffset);
+  const arr = arrivals(def, opts.offsets);
   const { map, mode } = opts;
   const push = (text: string, point: number, call: CallKind) => lines.push({ text, source: { step, point, call } });
 
@@ -142,7 +141,7 @@ function pathLines(def: PathDefinition, step: number, opts: PathOpts): Line[] {
 
     if (r.slowdown > 0) {
       // full speed until the last part, then the same move again, slower
-      const from = arr[i - 1];
+      const from = restOf(arr[i - 1]);
       const cut = (1 - r.slowdown) * Math.hypot(a.x - from.x, a.y - from.y);
       push(`${move(r.maxSpeed, timeout('move'))}${comment}`, i, 'move');
       push(`chassis.waitUntil(${num(cut)});`, i, 'move');
@@ -152,10 +151,15 @@ function pathLines(def: PathDefinition, step: number, opts: PathOpts): Line[] {
       push(`${move(r.maxSpeed, timeout('move'))}${comment}`, i, 'move');
     }
 
-    if (t?.kind === 'goal' && r.goalReset && mode === 'code') {
+    if (t?.kind === 'goal' && r.goalReset) {
+      // the robot can't get to the goal's centre: once it stops against the goal, put it where it really is (the
+      // ghost does it too, so it jumps back out of the goal)
       const g = map({ x: t.x, y: t.y, theta: 0 });
       push('chassis.waitUntilDone();', i, 'reset');
-      push(`chassis.setPoseFromGoal(${num(g.x)}, ${num(g.y)}${params([['forwards', r.reverse ? null : 'true']])});`, i, 'reset');
+      push(`chassis.setPoseFromGoal(${num(g.x)}, ${num(g.y)}${params([
+        ['forwards', r.reverse ? null : 'true'],
+        ['distance', num(opts.offsets.goalOffset)],
+      ])});`, i, 'reset');
     }
 
     if (action === 'turn') {
@@ -184,7 +188,7 @@ const FRAME_NOTE = '// Field frame: (0, 0) is the corner on blue\'s right, +X to
 /** One path on its own, as a function. */
 export function pathCode(name: string, def: PathDefinition, opts: CodeOptions): string {
   const body = pathLines(def, 0, {
-    setPose: !!def.resetPose, map: identity, clawOffset: opts.clawOffset, estimates: opts.estimates?.(def), mode: 'code',
+    setPose: !!def.resetPose, map: identity, offsets: opts, estimates: opts.estimates?.(def), mode: 'code',
   }).map(l => l.text);
   return [`// ${name}, made in PointWeaver.`, FRAME_NOTE, '', ...fn(cppName(name), body)].join('\n') + '\n';
 }
@@ -223,7 +227,7 @@ export function autonCode(name: string, auton: AutonDefinition, paths: Record<st
     written.add(id);
     // the auton's start pose is set in run(), so the first step's own setPose (if any) stays in its function
     const body = pathLines(stepView(def, step), k, {
-      setPose: !!def.resetPose, map: identity, clawOffset: opts.clawOffset, estimates: opts.estimates?.(def), mode: 'code',
+      setPose: !!def.resetPose, map: identity, offsets: opts, estimates: opts.estimates?.(def), mode: 'code',
     }).map(l => l.text);
     out.push('', ...fn(id, body, step.rotate ? `${step.path}, turned 180 degrees` : step.path));
   });
@@ -232,7 +236,7 @@ export function autonCode(name: string, auton: AutonDefinition, paths: Record<st
   const firstDef = first && paths[first.path];
   const run: string[] = [];
   if (firstDef?.points.length && !firstDef.resetPose) {
-    const a = arrivals(stepView(firstDef, first), opts.clawOffset)[0];
+    const a = arrivals(stepView(firstDef, first), opts)[0];
     run.push(`chassis.setPose(${num(a.x)}, ${num(a.y)}, ${num(wrapDeg(a.theta))});`);
   }
   run.push(...calls);
@@ -260,7 +264,7 @@ export function flatProgram(
     lines.push(...pathLines(stepView(s.def, s), k, {
       setPose: k === 0 || !!s.def.resetPose,
       map,
-      clawOffset: opts.clawOffset,
+      offsets: opts,
       estimates: opts.estimates?.(s.def),
       mode: opts.measure ? 'measure' : 'ghost',
     }));

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { AutonDefinition, PathDefinition } from '../../editor/types';
 import type { HistoryMode } from '../../hooks/useLibrary';
-import { stepGap, stepView } from '../../editor/pathOps';
+import { arrivals, stepGap, stepView, type Offsets } from '../../editor/pathOps';
 import { Icon, IconButton } from '../../components/Icon';
 import { MenuButton } from '../../components/Menu';
 import { Toggle } from '../../components/Controls';
@@ -19,12 +19,16 @@ interface Props {
   duration: number;
   /** steps with a move that timed out in the ghost */
   timeoutSteps: number[];
+  /** the robot's claw and goal offsets */
+  offsets: Offsets;
 }
 
 const fmt = (v: number) => (Math.round(v * 10) / 10).toString();
 
 /** An auton's paths in run order (drag to reorder), and the auton's own settings. */
-export function AutonPanel({ name, auton, paths, update, onOpenStep, hoverStep, onHoverStep, onNewPath, duration, timeoutSteps }: Props) {
+export function AutonPanel({
+  name, auton, paths, update, onOpenStep, hoverStep, onHoverStep, onNewPath, duration, timeoutSteps, offsets,
+}: Props) {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
   const steps = auton.steps;
@@ -42,7 +46,7 @@ export function AutonPanel({ name, auton, paths, update, onOpenStep, hoverStep, 
   };
 
   const first = steps[0] && paths[steps[0].path];
-  const start = first?.points.length ? stepView(first, steps[0]).points[0] : null;
+  const start = first?.points.length ? arrivals(stepView(first, steps[0]), offsets)[0] : null;
   const library = Object.keys(paths).sort((a, b) => a.localeCompare(b));
 
   return (
@@ -59,7 +63,7 @@ export function AutonPanel({ name, auton, paths, update, onOpenStep, hoverStep, 
       <div className="list scroll points" onMouseLeave={() => onHoverStep(null)}>
         {steps.map((s, k) => {
           const def = paths[s.path];
-          const gap = stepGap(auton, paths, k);
+          const gap = stepGap(auton, paths, k, offsets);
           const warn = !def ? `"${s.path}" is missing` : gap != null && gap > 1
             ? `Starts ${fmt(gap)} in from where path ${k} ends` : timeoutSteps.includes(k) ? 'A move times out in the ghost' : null;
           return (

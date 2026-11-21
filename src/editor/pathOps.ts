@@ -120,14 +120,14 @@ export function resolveParams(path: MoveParams | null | undefined, point: MovePa
 
 export type ResolvedParams = ReturnType<typeof resolveParams>;
 
-/** How far a step's start is from where the step before it ends (in), or null for the first step. */
-export function stepGap(auton: AutonDefinition, paths: Record<string, PathDefinition>, k: number): number | null {
+/** How far a step's start is from where the step before it leaves the robot (in), or null for the first step. */
+export function stepGap(auton: AutonDefinition, paths: Record<string, PathDefinition>, k: number, offsets: Offsets): number | null {
   if (k <= 0) return null;
   const prev = paths[auton.steps[k - 1]?.path];
   const cur = paths[auton.steps[k]?.path];
   if (!prev?.points.length || !cur?.points.length) return null;
-  const a = stepView(prev, auton.steps[k - 1]).points.at(-1)!;
-  const b = stepView(cur, auton.steps[k]).points[0];
+  const a = restOf(arrivals(stepView(prev, auton.steps[k - 1]), offsets).at(-1)!);
+  const b = arrivals(stepView(cur, auton.steps[k]), offsets)[0];
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
@@ -153,30 +153,57 @@ export interface Arrival {
   y: number;
   /** which way the robot faces when it gets there (before any turn) */
   theta: number;
+  /**
+   * At a goal with a pose reset: where the reset puts the robot, goalOffset back out from the goal's centre along
+   * the way it drove in. The next move starts here.
+   */
+  rest?: { x: number; y: number };
 }
+
+/** The robot's claw and goal offsets (in), from the robot settings. */
+export interface Offsets {
+  clawOffset: number;
+  goalOffset: number;
+}
+
+/** Where the robot is once it's done with a point (after any goal reset). */
+export const restOf = (a: Arrival) => a.rest ?? a;
 
 /**
  * Where the robot's centre goes for each point, and which way it faces there. A goal point sends the centre to the
- * goal; a pin or loader point stops short so the claw (clawOffset in front of the centre) is on the spot, facing the
- * point's heading (moveToPose) or the way it drives in.
+ * goal (and, with a reset, the robot then sits goalOffset out from it); a pin or loader point stops short so the
+ * claw (clawOffset in front of the centre) is on the spot, facing the point's heading (moveToPose) or the way it
+ * drives in.
  */
-export function arrivals(def: PathDefinition, clawOffset: number): Arrival[] {
+export function arrivals(def: PathDefinition, offsets: Offsets): Arrival[] {
   const out: Arrival[] = [];
   def.points.forEach((p, i) => {
-    const prev = out[i - 1];
+    const prev = out[i - 1] ? restOf(out[i - 1]) : undefined;
     const r = resolveParams(def.params, p.params);
+    const travel = prev && Math.hypot(p.x - prev.x, p.y - prev.y) > 1e-6 ? headingOf(p.x - prev.x, p.y - prev.y) : null;
     let theta: number;
     if (p.theta != null && (i === 0 || actionOf(p) === 'pose')) theta = p.theta;
-    else if (prev && Math.hypot(p.x - prev.x, p.y - prev.y) > 1e-6) theta = wrapDeg(headingOf(p.x - prev.x, p.y - prev.y) + (r.reverse ? 180 : 0));
-    else theta = p.theta ?? prev?.theta ?? 0;
+    else if (travel != null) theta = wrapDeg(travel + (r.reverse ? 180 : 0));
+    else theta = p.theta ?? out[i - 1]?.theta ?? 0;
     const t = targetById(p.target);
-    if (!t || t.kind === 'goal' || clawOffset <= 0) {
+    if (t?.kind === 'goal') {
+      const a: Arrival = { x: p.x, y: p.y, theta };
+      if (i > 0 && r.goalReset && offsets.goalOffset > 0) {
+        // what chassis.setPoseFromGoal does: the goal is goalOffset in front of the robot (behind it when reversing)
+        const f = headingVector(theta);
+        const side = r.reverse ? 1 : -1;
+        a.rest = { x: p.x + side * f.x * offsets.goalOffset, y: p.y + side * f.y * offsets.goalOffset };
+      }
+      out.push(a);
+      return;
+    }
+    if (!t || offsets.clawOffset <= 0) {
       out.push({ x: p.x, y: p.y, theta });
       return;
     }
     // claw on the spot: the centre stops clawOffset behind it, along the way the robot faces as it arrives
     const f = headingVector(theta);
-    out.push({ x: p.x - f.x * clawOffset, y: p.y - f.y * clawOffset, theta });
+    out.push({ x: p.x - f.x * offsets.clawOffset, y: p.y - f.y * offsets.clawOffset, theta });
   });
   return out;
 }

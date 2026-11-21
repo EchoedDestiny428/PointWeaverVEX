@@ -8,7 +8,7 @@ import type { RobotConfig } from '../../robot/config';
 import { poseAt, type GhostPose } from '../../editor/ghost';
 import { speedColor, speedStops } from '../../utils/speedColor';
 import {
-  arrivals, clampToField, headingVector, insertPoint, offsetPoints, removePoint, resolveParams, round1, updatePoint,
+  arrivals, clampToField, headingVector, insertPoint, offsetPoints, removePoint, resolveParams, restOf, round1, updatePoint,
   updatePointParams, wrapDeg, type Arrival, type PointStart,
 } from '../../editor/pathOps';
 import { TARGETS, targetById, type Target } from '../../editor/targets';
@@ -216,7 +216,54 @@ export function FieldCanvas(props: Props) {
   };
 
   /** Where the robot's centre goes for each point (claw spots stop short of the point). */
-  const arrivalsOf = (def: PathDefinition): Arrival[] => arrivals(def, latest.current.robot.clawOffset);
+  const arrivalsOf = (def: PathDefinition): Arrival[] => arrivals(def, latest.current.robot);
+
+  /**
+   * The robot's centre along a path as screen points, with each goal reset as a jump: into the goal's centre, then
+   * (pen up) from where the reset puts it. Returns the polyline's points and the jumps (from, to).
+   */
+  const traceOf = (arr: Arrival[]) => {
+    const line: { x: number; y: number; move: boolean }[] = [];
+    const jumps: [[number, number], [number, number]][] = [];
+    arr.forEach((a, i) => {
+      const [sx, sy] = toScreen(a.x, a.y);
+      line.push({ x: sx, y: sy, move: i === 0 });
+      if (a.rest) {
+        const [rx, ry] = toScreen(a.rest.x, a.rest.y);
+        jumps.push([[sx, sy], [rx, ry]]);
+        line.push({ x: rx, y: ry, move: true });
+      }
+    });
+    return { line, jumps };
+  };
+
+  const strokeTrace = (ctx: CanvasRenderingContext2D, line: { x: number; y: number; move: boolean }[]) => {
+    ctx.beginPath();
+    for (const p of line) {
+      if (p.move) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+  };
+
+  /** A goal reset: a thin dashed hop from the goal's centre to where the robot really is, and a small ring there. */
+  const drawJumps = (ctx: CanvasRenderingContext2D, jumps: [[number, number], [number, number]][], color: string) => {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    for (const [[ax, ay], [bx, by]] of jumps) {
+      ctx.setLineDash([2, 3]);
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(bx, by, 3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  };
 
   /** The goal, pin or loader closest to a screen spot, if it's close enough to snap to. */
   const nearestTarget = (sx: number, sy: number): Target | null => {
@@ -237,7 +284,7 @@ export function FieldCanvas(props: Props) {
   const slowMarker = (def: PathDefinition, arr: Arrival[], i: number): [number, number] | null => {
     const frac = resolveParams(def.params, def.points[i]?.params).slowdown;
     if (!(frac > 0) || i < 1 || !arr[i]) return null;
-    const a = arr[i - 1];
+    const a = restOf(arr[i - 1]);
     const b = arr[i];
     return toScreen(b.x + (a.x - b.x) * frac, b.y + (a.y - b.y) * frac);
   };
@@ -260,11 +307,11 @@ export function FieldCanvas(props: Props) {
     let bestD = HIT_LINE;
     for (const s of steps) {
       if (s.step === activeStep) continue;
-      const pts = arrivalsOf(s.def).map(p => toScreen(p.x, p.y));
+      const pts = traceOf(arrivalsOf(s.def)).line;
       for (let i = 0; i < pts.length; i++) {
-        const d = i === 0
-          ? Math.hypot(sx - pts[0][0], sy - pts[0][1])
-          : distToSegment(sx, sy, pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
+        const d = pts[i].move
+          ? Math.hypot(sx - pts[i].x, sy - pts[i].y)
+          : distToSegment(sx, sy, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
         if (d < bestD) {
           bestD = d;
           best = s.step;
@@ -416,20 +463,18 @@ export function FieldCanvas(props: Props) {
     for (const s of steps) {
       if (s.step === activeStep) continue;
       // through where the robot's centre goes (claw spots stop short of their point)
-      const pts = arrivalsOf(s.def).map((a, i) => ({ ...a, theta: s.def.points[i].theta }));
+      const arr = arrivalsOf(s.def);
+      const pts = arr.map((a, i) => ({ ...a, theta: s.def.points[i].theta }));
       if (!pts.length) continue;
       const hot = s.step === hoverStep;
-      ctx.strokeStyle = autonView ? (hot ? C.fg : C.muted) : hot ? C.contextHot : C.context;
+      const color = autonView ? (hot ? C.fg : C.muted) : hot ? C.contextHot : C.context;
+      ctx.strokeStyle = color;
       ctx.lineWidth = autonView ? (hot ? 2.25 : 1.5) : 1.25;
       if (!autonView) ctx.setLineDash([5, 4]);
-      ctx.beginPath();
-      pts.forEach((p, i) => {
-        const [sx, sy] = toScreen(p.x, p.y);
-        if (i === 0) ctx.moveTo(sx, sy);
-        else ctx.lineTo(sx, sy);
-      });
-      ctx.stroke();
+      const trace = traceOf(arr);
+      strokeTrace(ctx, trace.line);
       ctx.setLineDash([]);
+      drawJumps(ctx, trace.jumps, color);
       if (!autonView) continue;
       // the points, small, then the step's number at its start
       ctx.fillStyle = C.bg;
@@ -458,18 +503,19 @@ export function FieldCanvas(props: Props) {
   };
 
   /** The plain ghost trail: dashed, under the path line, so corner cutting shows where the two split. */
-  const drawGhostTrail = (ctx: CanvasRenderingContext2D, poses: GhostPose[]) => {
+  const drawGhostTrail = (ctx: CanvasRenderingContext2D, poses: GhostPose[], jumps: number[]) => {
     ctx.strokeStyle = C.ghostTrail;
     ctx.lineWidth = 1.75;
     ctx.setLineDash([4, 3]);
     ctx.beginPath();
     poses.forEach((p, i) => {
       const [sx, sy] = toScreen(p.x, p.y);
-      if (i === 0) ctx.moveTo(sx, sy);
+      if (i === 0 || jumps.includes(i)) ctx.moveTo(sx, sy);
       else ctx.lineTo(sx, sy);
     });
     ctx.stroke();
     ctx.setLineDash([]);
+    drawJumps(ctx, jumps.map(k => [toScreen(poses[k - 1].x, poses[k - 1].y), toScreen(poses[k].x, poses[k].y)]), C.ghostTrail);
   };
 
   /**
@@ -477,7 +523,7 @@ export function FieldCanvas(props: Props) {
    * speed), with a thin outline in the background color so it reads on the field. Runs of one color are stroked
    * together. Also notes the trail spot under the cursor, for the speed tooltip.
    */
-  const drawSpeedTrail = (ctx: CanvasRenderingContext2D, poses: GhostPose[]) => {
+  const drawSpeedTrail = (ctx: CanvasRenderingContext2D, poses: GhostPose[], jumps: number[]) => {
     const top = latest.current.robot.maxSpeed;
     const level = (speed: number) => Math.round(Math.min(1, speed / top) * (SPEED_LEVELS - 1));
     const pts = poses.map(p => toScreen(p.x, p.y));
@@ -488,7 +534,7 @@ export function FieldCanvas(props: Props) {
     ctx.globalAlpha = 0.7;
     ctx.lineWidth = 4.5;
     ctx.beginPath();
-    pts.forEach(([sx, sy], i) => (i === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy)));
+    pts.forEach(([sx, sy], i) => (i === 0 || jumps.includes(i) ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy)));
     ctx.stroke();
     ctx.globalAlpha = 1;
 
@@ -496,6 +542,12 @@ export function FieldCanvas(props: Props) {
     let run = -1;
     for (let i = 1; i < pts.length; i++) {
       const lv = level(poses[i].speed);
+      if (jumps.includes(i)) {
+        // a goal reset: no line across it
+        if (run >= 0) ctx.stroke();
+        run = -1;
+        continue;
+      }
       if (lv !== run) {
         if (run >= 0) ctx.stroke();
         run = lv;
@@ -508,6 +560,7 @@ export function FieldCanvas(props: Props) {
     ctx.stroke();
     ctx.lineCap = 'butt';
     ctx.lineJoin = 'miter';
+    drawJumps(ctx, jumps.map(k => [pts[k - 1], pts[k]]), C.ghostTrail);
 
     const c = cursor.current;
     if (!c || drag.current) return;
@@ -526,8 +579,8 @@ export function FieldCanvas(props: Props) {
   const drawGhost = (ctx: CanvasRenderingContext2D, playback: Playback) => {
     const poses = playback.ghost.poses;
     if (poses.length > 1) {
-      if (latest.current.speedColors) drawSpeedTrail(ctx, poses);
-      else drawGhostTrail(ctx, poses);
+      if (latest.current.speedColors) drawSpeedTrail(ctx, poses, playback.ghost.jumps);
+      else drawGhostTrail(ctx, poses, playback.ghost.jumps);
     }
     if (playback.state !== 'stopped') {
       const pose = poseAt(playback.ghost, playback.timeRef.current);
@@ -625,9 +678,11 @@ export function FieldCanvas(props: Props) {
     const d = drag.current;
     if (d?.kind !== 'point' || !d.moved) return;
     const p = path.points[d.index];
-    const a = arrivalsOf(path)[d.index];
-    if (!p || !a) return;
-    const theta = p.theta ?? a.theta;
+    const arrival = arrivalsOf(path)[d.index];
+    if (!p || !arrival) return;
+    // where the robot ends up: against the goal after a reset, otherwise where it's sent
+    const a = restOf(arrival);
+    const theta = arrival.rest ? arrival.theta : p.theta ?? arrival.theta;
     const { robot } = latest.current;
     const f = headingVector(theta);
     const side = { x: -f.y, y: f.x };
@@ -670,13 +725,9 @@ export function FieldCanvas(props: Props) {
     if (pts.length > 1) {
       ctx.strokeStyle = C.path;
       ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      arr.forEach((a, i) => {
-        const [sx, sy] = toScreen(a.x, a.y);
-        if (i === 0) ctx.moveTo(sx, sy);
-        else ctx.lineTo(sx, sy);
-      });
-      ctx.stroke();
+      const trace = traceOf(arr);
+      strokeTrace(ctx, trace.line);
+      drawJumps(ctx, trace.jumps, C.muted);
     }
 
     // early exit rings (the last point always has to arrive, so none there); "R" on moves driven backwards;
@@ -687,7 +738,8 @@ export function FieldCanvas(props: Props) {
     for (let i = 1; i < pts.length; i++) {
       const r = resolveParams(path.params, pts[i].params);
       const [sx, sy] = toScreen(arr[i].x, arr[i].y);
-      const [ax, ay] = toScreen(arr[i - 1].x, arr[i - 1].y);
+      const from = restOf(arr[i - 1]);
+      const [ax, ay] = toScreen(from.x, from.y);
       if (i < pts.length - 1 && r.earlyExitRange > 0) {
         ctx.strokeStyle = selection.includes(i) ? C.ringSelected : C.ring;
         ctx.lineWidth = 1.5;
@@ -963,7 +1015,7 @@ export function FieldCanvas(props: Props) {
     if (d.kind === 'slow' && path) {
       // slide the handle along the move: the slow part is from the handle to the point
       const arr = arrivalsOf(path);
-      const a = arr[d.index - 1];
+      const a = arr[d.index - 1] && restOf(arr[d.index - 1]);
       const b = arr[d.index];
       if (!a || !b) return;
       const [ax, ay] = toScreen(a.x, a.y);

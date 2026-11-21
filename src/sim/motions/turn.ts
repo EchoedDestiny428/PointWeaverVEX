@@ -147,7 +147,8 @@ export class Donut extends TurnMotion {
   }
 
   protected override rotate(state: DriveState, dt: number, robot: RobotConfig): void {
-    const reach = (this.donut.forwards ? 1 : -1) * (robot.length / 2 + 1);
+    // it orbits the goal it's on: the goal sits goalOffset in front (or behind)
+    const reach = (this.donut.forwards ? 1 : -1) * (robot.goalOffset ?? robot.length / 2 + 1);
     const pivot = add(state.pose, scale(forward(state.pose.theta), reach));
     state.pose.theta += state.w * dt;
     const center = sub(pivot, scale(forward(state.pose.theta), reach));
