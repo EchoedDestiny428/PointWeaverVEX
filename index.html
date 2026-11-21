@@ -1,154 +1,17 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="night">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>PointWeaver</title>
-    <meta name="description" content="Plays a VEX LemLib autonomous routine top-down on the field, flags collisions and replays robot logs." />
+    <meta name="description" content="VEX path editor: build autons out of reusable paths and get the LemLib code." />
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%2309090b'/%3E%3Cpath d='M6.5 17.5C12 17.5 12 6.5 17.5 6.5' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round'/%3E%3Ccircle cx='6.5' cy='17.5' r='2' fill='%23fff'/%3E%3Ccircle cx='17.5' cy='6.5' r='2' fill='%23fff'/%3E%3C/svg%3E"
     />
   </head>
   <body>
-    <div class="app" id="app">
-      <header class="bar">
-        <div class="brand" title="PointWeaver">
-          <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
-            <rect width="24" height="24" rx="6" />
-            <path d="M6.5 17.5C12 17.5 12 6.5 17.5 6.5" />
-            <circle cx="6.5" cy="17.5" r="2" />
-            <circle cx="17.5" cy="6.5" r="2" />
-          </svg>
-          <span class="brand-name">PointWeaver</span>
-        </div>
-        <button class="pill folder" id="open-folder" type="button" data-icon="FolderOpen" title="Open a PROS project folder">
-          <span id="project-name">Open folder</span>
-          <span class="live" id="live" hidden title="Watching for saves"></span>
-        </button>
-        <label class="icon-btn" id="open-file" for="file-input" title="Open a single .cpp file" data-icon="FileCode" hidden></label>
-        <input id="folder-input" type="file" webkitdirectory multiple hidden />
-        <input id="file-input" type="file" accept=".cpp,.cc,.cxx,.txt" hidden />
-        <input id="log-input" type="file" accept=".wpilog" hidden />
-        <div class="spacer"></div>
-        <div class="metrics">
-          <span class="metric" id="m-time" data-icon="Timer" title="Run time"><b>–</b></span>
-          <button class="metric" id="m-hits" type="button" data-icon="OctagonAlert" title="Collisions"><b>–</b></button>
-          <button class="metric" id="m-timeouts" type="button" data-icon="TimerOff" title="Moves that timed out"><b>–</b></button>
-          <button class="metric" id="m-warn" type="button" data-icon="TriangleAlert" title="Lines that were skipped"><b>–</b></button>
-          <button class="metric" id="m-resets" type="button" data-icon="LocateFixed" title="Pose resets" hidden><b>–</b></button>
-          <button class="metric" id="m-drift" type="button" data-icon="Spline" title="Max odometry drift" hidden><b>–</b></button>
-          <button class="metric" id="m-battery" type="button" data-icon="BatteryMedium" title="Lowest battery" hidden><b>–</b></button>
-        </div>
-        <button class="icon-btn" id="theme" type="button" title="Theme"></button>
-      </header>
-
-      <nav class="side" aria-label="Routines">
-        <div class="side-scroll" id="routine-list"></div>
-        <div class="side-foot">
-          <button class="routine log-row" id="log-row" type="button" data-icon="Activity" hidden><span class="routine-name" id="log-row-name"></span></button>
-          <button class="side-log" id="open-log" type="button" data-icon="FileUp" title="Open a robot log (.wpilog)"><span>Open log</span></button>
-        </div>
-      </nav>
-
-      <main class="stage">
-        <div class="field-wrap" id="field-wrap">
-          <svg id="field" viewBox="-80 -80 160 160" role="img" aria-label="Field"></svg>
-          <ul class="now" id="now"></ul>
-          <div class="field-tools">
-            <span class="over" id="over" hidden></span>
-            <button class="icon-btn" id="rotate" type="button" title="Rotate field (R)" data-icon="RotateCw"></button>
-          </div>
-          <span class="coords" id="coords"></span>
-          <span class="toast" id="toast" data-icon="RefreshCw"><span id="toast-text"></span></span>
-        </div>
-        <section class="plot" id="plot" aria-label="Signals" hidden>
-          <div class="plot-head">
-            <div class="legend" id="legend"></div>
-            <div class="picker-anchor">
-              <button class="icon-btn" id="add-channel" type="button" title="Graph a channel" data-icon="Plus" aria-expanded="false"></button>
-              <div class="picker" id="picker" hidden>
-                <input id="picker-search" type="search" placeholder="Search channels" spellcheck="false" autocomplete="off" />
-                <div class="picker-list" id="picker-list"></div>
-              </div>
-            </div>
-          </div>
-          <div class="plot-body" id="plot-body"></div>
-        </section>
-        <div class="transport">
-          <button class="icon-btn solid" id="play" type="button" title="Play (Space)" data-icon="Play"></button>
-          <button class="icon-btn" id="restart" type="button" title="Restart (Home)" data-icon="RotateCcw"></button>
-          <div class="scrub">
-            <div class="scrub-marks" id="scrub-marks"></div>
-            <input id="scrubber" type="range" min="0" max="0" value="0" step="any" aria-label="Time" />
-          </div>
-          <span class="clock"><b id="clock-now">0.00</b><span id="clock-total"></span></span>
-          <button class="pill mono" id="speed" type="button" title="Playback speed">1×</button>
-          <div class="seg" id="period" role="group" aria-label="Time limit">
-            <button type="button" data-period="15" title="Match autonomous">15s</button>
-            <button type="button" data-period="60" title="Skills">60s</button>
-          </div>
-        </div>
-      </main>
-
-      <aside class="inspector">
-        <div class="tabs" role="tablist">
-          <button class="tab" type="button" role="tab" data-tab="log" data-icon="Activity" title="Log" hidden></button>
-          <button class="tab" type="button" role="tab" data-tab="timeline" data-icon="ListOrdered" title="Timeline"></button>
-          <button class="tab" type="button" role="tab" data-tab="collisions" data-icon="OctagonAlert" title="Collisions">
-            <span class="badge" id="badge-collisions"></span>
-          </button>
-          <button class="tab" type="button" role="tab" data-tab="code" data-icon="CodeXml" title="Code">
-            <span class="badge warn" id="badge-code"></span>
-          </button>
-          <button class="tab" type="button" role="tab" data-tab="settings" data-icon="SlidersHorizontal" title="Settings"></button>
-        </div>
-        <section class="pane" data-pane="log">
-          <div class="log-top">
-            <div class="log-head">
-              <span class="log-file" id="log-file" data-icon="Activity"></span>
-              <button class="icon-btn" id="export-report" type="button" title="Export report (.report.md + .signals.csv)" data-icon="FileDown"></button>
-            </div>
-            <dl class="readout" id="readout"></dl>
-          </div>
-          <h3 class="sec" id="log-findings-head" data-icon="TriangleAlert">Findings</h3>
-          <ul class="list findings" id="log-findings"></ul>
-          <h3 class="sec" data-icon="Navigation">Motions <span class="sec-count" id="log-motions-count"></span></h3>
-          <ul class="list" id="log-motions"></ul>
-          <h3 class="sec" id="log-resets-head" data-icon="LocateFixed">Resets <span class="sec-count" id="log-resets-count"></span></h3>
-          <ul class="list" id="log-resets"></ul>
-        </section>
-        <section class="pane" data-pane="timeline">
-          <ul class="list" id="timeline"></ul>
-        </section>
-        <section class="pane" data-pane="collisions">
-          <ul class="list" id="collisions"></ul>
-        </section>
-        <section class="pane" data-pane="code">
-          <div class="code-head">
-            <span class="code-file" id="code-file" data-icon="FileCode"></span>
-            <button class="icon-btn" id="reveal" type="button" title="Open in editor" data-icon="SquareArrowOutUpRight" hidden></button>
-          </div>
-          <ul class="diagnostics" id="diagnostics"></ul>
-          <div class="code" id="code"></div>
-        </section>
-        <section class="pane" data-pane="settings">
-          <div class="set">
-            <h3>Count as collisions</h3>
-            <div class="toggles" id="obstacle-toggles"></div>
-          </div>
-          <div class="set">
-            <h3>Robot</h3>
-            <div class="grid2" id="robot-fields"></div>
-          </div>
-          <div class="set">
-            <h3>Macro time</h3>
-            <div class="rows" id="mechanism-fields"></div>
-          </div>
-          <button class="pill" id="reset-settings" type="button" data-icon="Undo2">Reset</button>
-        </section>
-      </aside>
-    </div>
-    <script type="module" src="./src/main.ts"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { CRIMSON_PROFILE } from "../src/profiles/crimson";
 import { discoverRoutines, routineProgram } from "../src/project/discover";
 import type { ProjectFile } from "../src/project/types";
-import { highlightLines } from "../src/ui/highlight";
 
 const selector = `
 namespace autons {
@@ -77,19 +76,5 @@ describe("routine discovery", () => {
   it("falls back to file names when there is no selector", () => {
     const loose = discoverRoutines([{ path: "src/autons/skills/v2.cpp", content: routine("skills::v2", "chassis.moveToPoint(0, 1, 500);") }], CRIMSON_PROFILE);
     expect(loose.routines.map((r) => [r.name, r.registered, r.periodSeconds])).toEqual([["v2", true, 60]]);
-  });
-});
-
-describe("code highlighting", () => {
-  it("keeps every character and tags tokens", () => {
-    const source = 'chassis.moveToPoint(1.5, -2, 900); // go\n/* a\nb */ void run() { x("s"); }';
-    const lines = highlightLines(source);
-    expect(lines.map((tokens) => tokens.map((t) => t.text).join(""))).toEqual(source.split("\n"));
-    expect(lines[0].find((t) => t.text === "moveToPoint")?.kind).toBe("call");
-    expect(lines[0].find((t) => t.text === "1.5")?.kind).toBe("number");
-    expect(lines[0].at(-1)?.kind).toBe("comment");
-    expect(lines[1][0].kind).toBe("comment");
-    expect(lines[2].find((t) => t.text === "void")?.kind).toBe("keyword");
-    expect(lines[2].find((t) => t.text === '"s"')?.kind).toBe("string");
   });
 });

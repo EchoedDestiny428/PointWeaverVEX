@@ -1,85 +1,124 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from "electron";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeTheme, shell } from "electron";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProjectWatcher, scanProject } from "./project.js";
-import type { ProjectSnapshot } from "./project.js";
 
-type ThemeSource = "system" | "light" | "dark";
+/*
+ * Autons and paths live in Documents/PointWeaver, one JSON file each:
+ *   paths/<name>.json    a path: points and LemLib settings
+ *   autons/<name>.json   an auton: the paths it runs, in order
+ *   settings.json        robot size and speed for the ghost
+ */
 
-interface DesktopSettings {
-  lastFolder?: string;
-  lastLogFolder?: string;
-}
-
-interface OpenedLog {
-  name: string;
-  path: string;
-  bytes: Uint8Array;
-}
+type Kind = "path" | "auton";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const devServer = process.argv.includes("--dev") ? "http://localhost:5173" : null;
-const BAR_HEIGHT = 48;
+const NAME_RE = /^[A-Za-z0-9_\- ]+$/;
+const FOLDERS: Record<Kind, string> = { path: "paths", auton: "autons" };
 
 let win: BrowserWindow | null = null;
-let currentRoot: string | null = null;
-let currentLog: string | null = null;
 
-const settingsFile = (): string => path.join(app.getPath("userData"), "settings.json");
+const storeDir = (): string => path.join(app.getPath("documents"), "PointWeaver");
+const folder = (kind: Kind): string => path.join(storeDir(), FOLDERS[kind]);
+const settingsFile = (): string => path.join(storeDir(), "settings.json");
 
-async function readSettings(): Promise<DesktopSettings> {
-  try {
-    return JSON.parse(await readFile(settingsFile(), "utf8")) as DesktopSettings;
-  } catch {
-    return {};
-  }
+function fileFor(kind: unknown, name: unknown): string {
+  if (kind !== "path" && kind !== "auton") throw new Error(`Unknown kind: ${String(kind)}`);
+  if (typeof name !== "string" || !NAME_RE.test(name)) throw new Error(`Invalid name: ${String(name)}`);
+  return path.join(folder(kind), `${name}.json`);
 }
 
-async function writeSettings(settings: DesktopSettings): Promise<void> {
-  try {
-    await mkdir(path.dirname(settingsFile()), { recursive: true });
-    await writeFile(settingsFile(), JSON.stringify(settings, null, 2));
-  } catch {
-    return;
-  }
-}
-
-function overlayColors(): { color: string; symbolColor: string; height: number } {
-  return nativeTheme.shouldUseDarkColors
-    ? { color: "#09090b", symbolColor: "#fafafa", height: BAR_HEIGHT }
-    : { color: "#ffffff", symbolColor: "#09090b", height: BAR_HEIGHT };
-}
-
-const watcher = new ProjectWatcher((snapshot) => {
-  if (snapshot.root === currentRoot) win?.webContents.send("project:changed", snapshot);
-});
-
-async function openRoot(root: string): Promise<ProjectSnapshot> {
-  currentRoot = root;
-  const snapshot = await scanProject(root);
-  await watcher.start(root);
-  await writeSettings({ ...(await readSettings()), lastFolder: root });
-  return snapshot;
-}
-
-async function loadLog(file: string): Promise<OpenedLog> {
-  const target = path.resolve(file);
-  const bytes = new Uint8Array(await readFile(target));
-  currentLog = target;
-  await writeSettings({ ...(await readSettings()), lastLogFolder: path.dirname(target) });
-  return { name: path.basename(target), path: target, bytes };
-}
-
-const reportPaths = (log: string): { report: string; csv: string } => {
-  const base = log.replace(/\.wpilog$/i, "");
-  return { report: `${base}.report.md`, csv: `${base}.signals.csv` };
+const writeJson = (file: string, data: unknown): void => {
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
 };
 
-function isInside(root: string, target: string): boolean {
-  const relative = path.relative(root, target);
-  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative);
+function readAll(kind: Kind, skipped: string[]): Record<string, unknown> {
+  const dir = folder(kind);
+  const out: Record<string, unknown> = {};
+  if (!existsSync(dir)) return out;
+  for (const file of readdirSync(dir).filter((f) => f.toLowerCase().endsWith(".json")).sort()) {
+    const name = file.slice(0, -5);
+    if (!NAME_RE.test(name)) continue;
+    try {
+      out[name] = JSON.parse(readFileSync(path.join(dir, file), "utf8"));
+    } catch (e) {
+      skipped.push(`${FOLDERS[kind]}/${file}: ${(e as Error).message}`);
+    }
+  }
+  return out;
 }
+
+/** Wrap a handler so it always resolves to its result or { error }. */
+function handle(channel: string, fn: (...args: unknown[]) => unknown): void {
+  ipcMain.handle(channel, async (_event, ...args: unknown[]) => {
+    try {
+      return (await fn(...args)) ?? { ok: true };
+    } catch (e) {
+      return { error: (e as Error).message };
+    }
+  });
+}
+
+handle("store:load", () => {
+  const skipped: string[] = [];
+  const paths = readAll("path", skipped);
+  const autons = readAll("auton", skipped);
+  let settings: unknown = null;
+  if (existsSync(settingsFile())) {
+    try {
+      settings = JSON.parse(readFileSync(settingsFile(), "utf8"));
+    } catch (e) {
+      skipped.push(`settings.json: ${(e as Error).message}`);
+    }
+  }
+  return { dir: storeDir(), paths, autons, settings, skipped };
+});
+
+handle("store:write", (kind, name, data) => writeJson(fileFor(kind, name), data));
+
+handle("store:delete", (kind, name) => {
+  const file = fileFor(kind, name);
+  if (existsSync(file)) unlinkSync(file);
+});
+
+handle("store:rename", (kind, from, to) => {
+  const src = fileFor(kind, from);
+  const dst = fileFor(kind, to);
+  if (existsSync(dst)) throw new Error("That name is already taken.");
+  if (existsSync(src)) renameSync(src, dst);
+});
+
+handle("store:writeSettings", (data) => writeJson(settingsFile(), data));
+
+handle("store:reveal", async () => {
+  mkdirSync(storeDir(), { recursive: true });
+  const err = await shell.openPath(storeDir());
+  if (err) throw new Error(err);
+});
+
+handle("clipboard:write", (text) => {
+  if (typeof text === "string") clipboard.writeText(text);
+});
+
+handle("theme:set", (source) => {
+  if (source === "light" || source === "dark" || source === "system") nativeTheme.themeSource = source;
+});
+
+// Writes still waiting when the window closes: done synchronously so nothing is lost.
+ipcMain.on("store:flushSync", (event, writes: unknown) => {
+  try {
+    if (Array.isArray(writes)) {
+      for (const w of writes as Array<{ kind: unknown; name: unknown; data: unknown }>) {
+        writeJson(fileFor(w.kind, w.name), w.data);
+      }
+    }
+    event.returnValue = true;
+  } catch {
+    event.returnValue = false;
+  }
+});
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -89,9 +128,8 @@ function createWindow(): void {
     minHeight: 620,
     show: false,
     title: "PointWeaver",
-    backgroundColor: nativeTheme.shouldUseDarkColors ? "#09090b" : "#ffffff",
-    titleBarStyle: "hidden",
-    titleBarOverlay: overlayColors(),
+    backgroundColor: "#000000",
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(here, "preload.cjs"),
       contextIsolation: true,
@@ -111,11 +149,11 @@ function createWindow(): void {
     event.preventDefault();
   });
   win.webContents.on("before-input-event", (event, input) => {
-    if (!devServer || input.type !== "keyDown") return;
+    if (input.type !== "keyDown") return;
     if (input.key === "F12") {
       win?.webContents.toggleDevTools();
       event.preventDefault();
-    } else if (input.key.toLowerCase() === "r" && input.control) {
+    } else if (devServer && input.key.toLowerCase() === "r" && input.control) {
       win?.webContents.reload();
       event.preventDefault();
     }
@@ -127,76 +165,6 @@ function createWindow(): void {
   if (devServer) void win.loadURL(devServer);
   else void win.loadFile(path.join(here, "..", "dist", "index.html"));
 }
-
-ipcMain.handle("project:open", async () => {
-  const options = { title: "Open a PROS project folder", properties: ["openDirectory" as const] };
-  const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
-  if (picked.canceled || picked.filePaths.length === 0) return null;
-  return openRoot(picked.filePaths[0]);
-});
-
-ipcMain.handle("project:restore", async () => {
-  const { lastFolder } = await readSettings();
-  if (!lastFolder) return null;
-  try {
-    return await openRoot(lastFolder);
-  } catch {
-    return null;
-  }
-});
-
-ipcMain.handle("project:reveal", async (_event, relative: unknown) => {
-  if (!currentRoot || typeof relative !== "string") return false;
-  const target = path.resolve(currentRoot, relative);
-  if (!isInside(currentRoot, target)) return false;
-  return (await shell.openPath(target)) === "";
-});
-
-ipcMain.handle("log:open", async () => {
-  const { lastLogFolder } = await readSettings();
-  const options = {
-    title: "Open a robot log",
-    defaultPath: lastLogFolder,
-    filters: [{ name: "Robot log", extensions: ["wpilog"] }],
-    properties: ["openFile" as const],
-  };
-  const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
-  if (picked.canceled || picked.filePaths.length === 0) return null;
-  return loadLog(picked.filePaths[0]);
-});
-
-ipcMain.handle("log:read", async (_event, file: unknown) => {
-  if (typeof file !== "string" || !path.isAbsolute(file) || !/\.wpilog$/i.test(file)) return null;
-  try {
-    return await loadLog(file);
-  } catch {
-    return null;
-  }
-});
-
-ipcMain.handle("log:export", async (_event, log: unknown, report: unknown, csv: unknown) => {
-  if (!currentLog || typeof log !== "string" || typeof report !== "string" || typeof csv !== "string") return null;
-  if (path.resolve(log) !== currentLog) return null;
-  const out = reportPaths(currentLog);
-  const folder = path.dirname(currentLog);
-  if (path.dirname(out.report) !== folder || path.dirname(out.csv) !== folder) return null;
-  await writeFile(out.report, report);
-  await writeFile(out.csv, csv);
-  return out;
-});
-
-ipcMain.handle("theme:set", (_event, source: unknown) => {
-  if (source === "system" || source === "light" || source === "dark") {
-    nativeTheme.themeSource = source as ThemeSource;
-  }
-});
-
-nativeTheme.on("updated", () => {
-  if (win && !win.isDestroyed()) {
-    win.setTitleBarOverlay(overlayColors());
-    win.setBackgroundColor(overlayColors().color);
-  }
-});
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -214,7 +182,6 @@ if (!app.requestSingleInstanceLock()) {
     });
   });
   app.on("window-all-closed", () => {
-    watcher.stop();
     if (process.platform !== "darwin") app.quit();
   });
 }

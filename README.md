@@ -1,14 +1,12 @@
 # PointWeaver
 
-PointWeaver plays your VEX LemLib autonomous routines top-down on the field. Open your PROS project folder and it:
+PointWeaver is a path editor for VEX autons that writes LemLib code. It looks and works like the FRC PointWeaver app:
 
-- lists every auton from the selector,
-- simulates it, and
-- re-runs it every time you save a file.
+- An **auton** is a folder of short **paths**. A path can be reused in many autons, and each use can be turned 180° for the other half of the field.
+- Click and drag points on the Override field. A ghost robot drives the auton through PointWeaver's LemLib simulator.
+- The **Output code** tab has the auton's code, ready to copy into the robot project.
 
-It flags collisions, timed-out moves and the time limit. The model is kinematic, not physics: collisions are reported, and the robot drives straight through them.
-
-It also replays the robot's own `.wpilog` logs and writes a tuning report from them (see [Log replay & tuning reports](#log-replay--tuning-reports)).
+There's nothing to open. Everything saves on its own to `Documents\PointWeaver`.
 
 ## Install (teammates)
 
@@ -23,68 +21,87 @@ The app isn't code-signed, so Windows may say *"Windows protected your PC"*. Cli
 
 ## Use
 
-1. Click **Open folder** and pick the robot repo, meaning the folder that contains `src/`.
-2. Pick a routine on the left. The names and order come from `kRoutines` in `selector.cpp`. ★ marks `kDefaultRoutine`, and files that aren't registered yet show under *Not in selector*.
-3. Press ▶ or drag the timeline.
-4. Edit the auton in VS Code and save. PointWeaver reloads and re-simulates on its own. The folder is remembered for next time.
+1. Click **+** next to **Autons** and name it.
+2. Click **+** next to **Paths** on the right, then **New path…**. The path goes into the auton and opens.
+3. Double-click the field to add points. Point 0 is where the path starts, and the robot drives to each point after it.
+4. Click a point to edit it on the right. Turn its heading on, then choose what happens there:
+   - **Drive into**: `chassis.moveToPose`, arriving at that heading.
+   - **Turn**: `chassis.moveToPoint`, then `chassis.turnToHeading` in place.
+   - **Donut**: `chassis.moveToPoint`, then `chassis.donut`, Crimson's orbit turn.
+
+   With the heading off, the point is a plain `chassis.moveToPoint`. Turns and donuts have their own timeout, separate from the move's.
+5. Open the auton in the sidebar to see all of its paths. Add a path you already have with **+** in the auton's path list, or drag it in from **Paths** on the left. Click ↻ on a path to turn that use 180° about the field centre. The goals are placed point-symmetrically, so a move made on blue's half works the same way on red's half.
+6. Open **Output code** and click the copy button.
+
+Editing a path changes it in every auton that uses it, including the turned uses. You can edit a turned use where it sits on the field. The sidebar shows how many times each path is used.
 
 | Control | Action |
 | --- | --- |
-| **Space** | Play / pause |
-| **← / →** | Step 0.1 s (hold **Shift** for 1 s) |
-| **Home** | Back to the start |
-| **1 – 4** | Timeline · Collisions · Code · Settings (with a log open: Log · Code · Settings) |
-| **R** | Rotate the field background 90° (the ↻ button does the same). Paths, the robot and the coordinates stay where they are |
-| Click the field | Copies the `x, y` under the cursor |
-| Click a row or a code line | Jumps to that moment |
+| Double-click the field | Adds a point (on a segment, it goes between those two points) |
+| Drag a point / its heading handle | Moves it / turns it (hold **Shift** to snap to 15°, **Alt** to snap to the 6 in grid) |
+| Scroll over the selected point | Turns its heading 5° |
+| **Shift**-click a point | Deletes it |
+| **Shift**-drag on the field | Selects a group to move together |
+| Drag the field, scroll | Pans, zooms |
+| Click another path of the auton | Opens it |
+| **Space** | Plays or pauses the ghost |
+| **Esc** | Deselects the point. With nothing selected, goes back to the whole auton |
+| **Del** | Deletes the selected points |
+| **↑ / ↓** | Selects the previous or next point |
+| **Ctrl+Z / Ctrl+Y** | Undo / redo |
+| **Ctrl+S** | Saves now (changes also save on their own) |
+| **F / G / V** | Fit the field / 6 in grid / color the ghost trail by speed |
 
-The top bar shows the run time, collisions, timed-out moves and skipped lines. Click a count to open its list. The **15s / 60s** switch sets the limit; routines in a `skills` folder default to 60 s.
+The toolbar shows the ghost's run time. It turns bold with a ⚠ when the run is over the limit (15 s, or 60 s with **Skills** on), or when a move hits its timeout. That point gets a dashed ring.
 
-**Settings** (the sliders tab) has:
+**Robot** (bottom left) sets the ghost's size and speed. It only changes the ghost, not the code.
 
-- which obstacles count as collisions;
-- the robot's size, speed and acceleration;
-- how long each blocking macro takes.
+## Output code
 
-Measure these from the real robot so the timing means something.
+Each path becomes a function. A turned use gets a second function ending in `_rot180`. `run()` sets the start pose (point 0 of the first path) and calls the paths in order:
 
-## What it understands
+```cpp
+void corner_rush() {
+    chassis.moveToPoint(43.7, 72.4, 2000);
+    chassis.moveToPose(47.8, 38.9, 180, 2000, {.forwards = false, .maxSpeed = 90});
+}
 
-| Code | Simulated as |
-| --- | --- |
-| `chassis.moveToPoint`, `moveToPose`, `turnToHeading`, `turnToPoint`, `swingToHeading`, `swingToPoint` | LemLib motions. Each takes the timeout, the swing's locked side, and `{.forwards, .maxSpeed, .minSpeed, .earlyExitRange, .direction, .lead}`. They are async, so the next line runs at once, and a new motion queues behind the current one like LemLib. |
-| `chassis.donut(...)` | Crimson's orbit turn, with `fastSpeed` / `slowSpeed` |
-| `chassis.waitUntilDone()`, `waitUntil(d)`, `cancelMotion()`, `setPose(...)` | Same as LemLib |
-| `chassis.setPoseFromGoal(x, y, {.forwards, .distance, .maxCorrection})` | Crimson's goal snap: puts the robot's centre `distance` (7") behind its back (or in front with `.forwards = true`), along its heading. Like on the robot, it's skipped when that would move the robot more than `maxCorrection` (10") |
-| `parallel({ [] { ... }, [] { ... } })` | The tasks run together, and the routine continues when all of them finish |
-| `for (const double stage : {kStage1, kStage2})`, `for (int i = 0; i < 4; i++)` | One pass per value. The value is substituted into the body, so `flip_out(stage, …)` becomes `flip_out(kStage2, …)` on pass 2, and the timeline marks each pass |
-| `pros::delay(ms)` | Waits |
-| `macros::flip_out`, `dual_pickup`, … | Blocks for its **Macro time** |
-| `claw::`, `intake::`, `intake_lift.set_value`, … | Instant |
-| Math in arguments | `-24 + 7.5`, `chassis.getPose().theta + 90`, `M_PI` |
+void corner_rush_rot180() {
+    chassis.moveToPoint(100.3, 71.6, 2000);
+    chassis.moveToPose(96.2, 105.1, 0, 2000, {.forwards = false, .maxSpeed = 90});
+}
 
-`setup()` runs right before `run()`. `if`, `while`, loops over named arrays and variables are skipped, and each skip shows a warning on its line.
+void run() {
+    chassis.setPose(17.7, 72.4, 0);
+    corner_rush();
+    corner_rush_rot180();
+}
+```
 
-## Log replay & tuning reports
+Settings that are left at LemLib's default stay out of the call. Each point can set **Timeout** (ms), **Exit** (`earlyExitRange`, in), **Max** and **Min** speed (0–127) and **Reverse** (`forwards = false`). Leave a box empty to use the path's default. Set the path's defaults with no point selected.
 
-On every run the robot writes everything it measures to the SD card as `/usd/crimson_000N.wpilog` (the next unused number), in inches and LemLib degrees.
+**Set pose at start** on a path adds a `chassis.setPose` at its point 0, for re-localising partway through an auton.
 
-1. Run an auton from the competition switch or field control.
-2. Copy `crimson_000N.wpilog` off the SD card.
-3. Click **Open log** at the bottom left, or drop the file anywhere on the window. Click a routine to go back to the simulator, and the log's row to return.
+### Field frame
 
-| Where | What you see |
-| --- | --- |
-| Field | **Robot**: the corrected pose and its trace. **Raw**: odometry that is never reset, as a dashed ghost. **Vision**: pose fixes as dots. **Target**: a crosshair (and heading ray) for the running motion. Dashed jumps mark each `setPose` / `setPoseFromGoal` correction; hover one for its `file:line`. If the open project has the logged routine (`/Auton/Selected`), its simulated path is drawn faintly underneath, so you can compare planned against actual |
-| Legend | A colored square per series. The field and the graph use the same color. Click a chip to hide or show it; **×** removes a graphed channel |
-| Graph | X, Y and heading for robot, raw and target, with auton and driver time shaded and each motion as a bar on top (amber = timed out). **+** graphs any logged channel (search `intake temp`, `battery volt`, …), up to four. Hover for values, click or drag to seek |
-| Log tab | Values at the playhead, the analyzer's findings, and every motion and pose reset with its `file:line`. Click a row to jump there |
-| Code tab | Highlights the line of the running motion |
-| Top bar | Log length, timed-out motions, pose resets, the largest drift between corrected and raw odometry, and the lowest battery voltage. Click drift or battery to jump to that moment |
+The coordinates match `include/constants/field_constants.hpp` in the robot repo. (0, 0) is the corner on blue's right as they face red. X and Y run from 0 to 144 in, with +X from the blue wall to the red wall. Heading 0 faces red and turns clockwise, so heading 90 faces −Y. On screen, blue is on the left.
 
-**Export report** (the download icon in the Log tab) writes `<log>.report.md` and `<log>.signals.csv` next to the log. These are the same files `npm run analyze -- <log>` makes. Give both to Claude and ask for PID and odometry tuning. The report covers each motion's error, timeout, overshoot and path deviation, each reset's jump and drift per 100 in driven, IMU drift, wheel slip, motor temperature and current, and battery sag.
+## Files
 
-The files are standard WPILOG, so AdvantageScope can graph them too.
+Everything is plain JSON in `Documents\PointWeaver`. Click the folder button at the top left to open it.
+
+```
+Documents\PointWeaver\
+  autons\<name>.json   the paths an auton runs, in order: [{ "path": "corner rush", "rotate": true }, ...]
+  paths\<name>.json    a path's points and LemLib settings
+  settings.json        the ghost's robot size and speed
+```
+
+Autons refer to paths by name, so renaming a path in the app updates every auton that uses it. In a plain browser (`npm run dev`), everything is kept in the browser's storage instead.
+
+## Log tuning reports
+
+The robot writes everything it measures to the SD card as `/usd/crimson_000N.wpilog`. `npm run analyze -- <log.wpilog>` writes `<log>.report.md` and `<log>.signals.csv` next to the log. Give both to Claude and ask for PID and odometry tuning. The files are standard WPILOG, so AdvantageScope can graph them too. (The app's old log replay view has been removed. The report command still works.)
 
 ## Develop
 
@@ -99,50 +116,42 @@ npm test
 
 - `npm run app` builds and opens the desktop app.
 - `npm run dist` builds `release/PointWeaver-Setup-*.exe` and `release/PointWeaver-*-portable.exe`.
-- `npm test` runs the parser, simulator, discovery, log and replay tests.
+- `npm test` runs the code generator, ghost, parser, simulator and log tests.
 
 | Script | Does |
 | --- | --- |
 | `npm run dev` + `npm run app:dev` | Live-reloading UI inside the desktop shell (F12 opens DevTools) |
-| `npm run build` | `dist/index.html`, a single self-contained page that also works in a browser (it uses a folder upload instead of live reload) |
+| `npm run dev` alone | The editor in a browser at http://localhost:5173, saving to browser storage |
 | `npm run typecheck` | Checks the app, the Electron code and the CLI |
-| `npm run analyze -- <log.wpilog>` | Writes the tuning report `<log>.report.md` and the 50 Hz signals `<log>.signals.csv` next to the log |
-| `npm run sample` | Rebuilds `examples/sample.wpilog`, a synthetic TeamBad match log made with the simulator |
-| `npm run dev`, then `/?log=/examples/sample.wpilog&t=6` | Opens a log from a URL in the browser build (`t` seeks, `rotate=90` turns the field background, `tab=code` picks a tab) |
+| `npm run analyze -- <log.wpilog>` | Writes the tuning report and signals CSV next to the log |
+| `npm run sample` | Rebuilds `examples/sample.wpilog`, a synthetic match log made with the simulator |
 
 ### Layout
 
 ```
-electron/     desktop shell: window, folder picker, file watcher (main + preload)
+electron/        desktop shell: window, Documents\PointWeaver storage (main + preload)
 src/
-  core/       angles and 2D geometry
-  field/      one file per season (override.ts)
-  robot/      robot size and limits
-  profiles/   team profile: chassis name, macro times, selector pattern (crimson.ts)
-  program/    C++ reader -> AST -> C++ writer
-  project/    finds routines in a project folder
-  sim/        motions, the LemLib-style scheduler, collisions
-  log/        WPILOG reader and writer, replay model, tuning report, sample log
-  render/     SVG field, robot, log replay and graph
-  ui/         the app: panels, playback, saved state, icons
-scripts/      CLI entry points (analyze, make-sample), built to dist-cli/
-tests/        vitest suites
-build/        app icon
+  App.tsx        the editor: sidebar, field, toolbar, right panel (React)
+  editor/        autons and paths: types, path operations, LemLib code generator, ghost, storage
+  features/      sidebar, field canvas and toolbar, point list, inspector, auton panel, code view
+  hooks/         library state (undo, autosave), playback, theme
+  components/    icons, number fields, toggles, menus
+  core/          angles and 2D geometry
+  field/         one file per season (override.ts)
+  robot/         robot size and limits
+  profiles/      team profile: chassis name, robot defaults (crimson.ts)
+  program/       C++ reader -> AST -> C++ writer (the ghost runs the generated code through it)
+  sim/           LemLib motions and scheduler
+  log/           WPILOG reader and writer, tuning report
+  project/       finds routines in a PROS project (used by the tests)
+scripts/         CLI entry points (analyze, make-sample), built to dist-cli/
+tests/           vitest suites
 ```
 
-The `core`, `field`, `program`, `project`, `sim` and `log` folders contain no browser or Electron code, so the tests and the CLI can reuse them.
+The look comes from the FRC PointWeaver app (`PointWeaverApp`). `App.css` is its stylesheet, and `vex.css` adds the auton folders, tabs and code view.
 
 ### Extending
 
 - **New season**: add `src/field/<game>.ts` and register it in `src/field/index.ts`.
-- **Another team**: copy `src/profiles/crimson.ts`. Change the chassis name, macro times, instant-call prefixes and the selector `registry` pattern.
-- **New LemLib call**: add it to `MOTION_COMMANDS` in `src/sim/commands.ts` and write a `Motion` in `src/sim/motions/`.
+- **New LemLib call**: add it to `pointCalls` in `src/editor/codegen.ts`. For the ghost to drive it, add it to `MOTION_COMMANDS` in `src/sim/commands.ts`.
 - **New version**: bump `version` in `package.json`, then run `npm run dist`.
-
-## Roadmap: path planner
-
-1. Drag waypoints on the field. The edits go to the AST, and `emitCpp` writes the routine back to the file the watcher is already tracking.
-2. Snap points to goals and tiles, and add per-point headings and timeouts.
-3. Show collisions live while dragging. The simulator already reports them for every frame.
-4. Add path events ("start intake at 40%") that become `waitUntil` + macro calls.
-5. Read robot measurements from a JSON file in the robot repo.

@@ -1,9 +1,9 @@
 {
   "name": "pointweaver-vex",
   "productName": "PointWeaver",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
-  "description": "Top-down simulator for VEX LemLib autonomous routines, built to grow into a path planner.",
+  "description": "VEX path editor: build autons out of reusable paths and get the LemLib code.",
   "author": "Crimson",
   "type": "module",
   "main": "dist-electron/main.js",
@@ -24,9 +24,11 @@
   },
   "devDependencies": {
     "@types/node": "24.19.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
     "electron": "44.4.5",
     "electron-builder": "26.15.3",
-    "lucide": "1.47.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
     "vite-plugin-singlefile": "^2.3.3",
@@ -69,5 +71,9 @@
     "portable": {
       "artifactName": "PointWeaver-${version}-portable.exe"
     }
+  },
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
   }
 }

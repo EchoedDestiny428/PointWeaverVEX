@@ -1,0 +1,478 @@
+/* VEX additions on top of App.css (the FRC app's look): autons as folders of paths, tabs, output code. */
+
+.app {
+  transition: grid-template-columns 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* the Output code tab gets a wider panel so whole calls fit */
+.app.code-open {
+  grid-template-columns: 232px minmax(0, 1fr) 460px;
+}
+
+.project-btn:disabled {
+  cursor: default;
+}
+
+.project-btn:disabled:hover {
+  border-color: var(--line);
+  color: var(--text-2);
+}
+
+/* autons and paths scroll together; the robot and field sections stay at the bottom */
+.side-scroll {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.side-scroll .list {
+  padding-bottom: 4px;
+}
+
+.chevron {
+  width: 18px;
+  height: 18px;
+  margin-left: -4px;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+
+.chevron.open {
+  transform: rotate(90deg);
+}
+
+.list-row.selected .chevron {
+  color: var(--on-text-muted);
+}
+
+.list-row.drop-into {
+  outline: 1px dashed var(--text);
+  outline-offset: -1px;
+}
+
+.tag,
+.uses {
+  flex: none;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.tag {
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+}
+
+.list-row.selected .tag,
+.list-row.selected .uses {
+  color: var(--on-text-muted);
+  border-color: var(--on-text-muted);
+}
+
+.list-row:hover .uses {
+  display: none;
+}
+
+/* an auton's paths, indented under it on a guide line (like the FRC app's point events) */
+.sub-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 1px 0 4px 13px;
+  padding-left: 7px;
+  border-left: 1px solid var(--line-strong);
+}
+
+.sub-list.selected {
+  border-left-color: var(--muted);
+}
+
+.sub-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+  flex: none;
+}
+
+.sub-row:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.sub-row.selected {
+  background: var(--text);
+  color: var(--on-text);
+}
+
+.sub-row .idx {
+  width: 12px;
+  flex: none;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sub-row.selected .idx,
+.sub-row.selected .rot {
+  color: var(--on-text-muted);
+}
+
+.sub-row .rot {
+  display: inline-grid;
+  color: var(--muted);
+}
+
+.sub-row.missing,
+.missing {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+
+.sub-row.add {
+  gap: 4px;
+  padding-left: 0;
+  color: var(--muted);
+  cursor: default;
+}
+
+.sub-row.add:hover {
+  background: transparent;
+}
+
+.sub-row.add .icon-btn {
+  width: 22px;
+  height: 22px;
+}
+
+.sub-row.editing {
+  padding: 0;
+  background: transparent;
+}
+
+.faint {
+  color: var(--faint);
+}
+
+/* menus that open downward (from list headers) */
+.menu.down {
+  top: calc(100% + 6px);
+  bottom: auto;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.sub-row .menu.down {
+  left: 0;
+  right: auto;
+}
+
+.menu-empty {
+  padding: 8px 10px;
+  color: var(--muted);
+}
+
+/* ---------- right panel tabs ---------- */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin: 10px 10px 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--raised);
+  flex: none;
+}
+
+.tabs button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 28px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.tabs button:hover {
+  color: var(--text);
+}
+
+.tabs button.on {
+  background: var(--text);
+  color: var(--on-text);
+}
+
+/* ---------- auton steps ---------- */
+
+.step-row .idx {
+  width: 14px;
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.step-row .icon-btn {
+  width: 24px;
+  height: 24px;
+}
+
+.readout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.readout .num {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.hint svg {
+  vertical-align: -2px;
+}
+
+/* what each point makes in code */
+.call {
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.call.pose,
+.call.turn,
+.call.donut {
+  color: var(--text-2);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.point-row.selected .call {
+  color: var(--on-text-muted);
+}
+
+.point-row.selected .call.pose,
+.point-row.selected .call.turn,
+.point-row.selected .call.donut {
+  box-shadow: inset 0 0 0 1px var(--on-text-muted);
+}
+
+.call-name {
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* ---------- segmented choice ---------- */
+
+.segmented {
+  display: flex;
+  gap: 2px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--raised);
+}
+
+.segmented button {
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.segmented button:hover {
+  color: var(--text);
+}
+
+.segmented button.on {
+  background: var(--text);
+  color: var(--on-text);
+}
+
+/* ---------- output code ---------- */
+
+.code-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.code {
+  flex: 1;
+  margin: 0 10px 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--raised);
+  overflow: auto;
+  font: 12px/1.6 'Cascadia Code', Consolas, monospace;
+  color: var(--text-2);
+  white-space: pre;
+  tab-size: 4;
+  user-select: text;
+  outline: none;
+}
+
+.code::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.code::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 3px;
+}
+
+.code::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.tok-kw {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.tok-fn {
+  color: var(--text);
+}
+
+.tok-num {
+  color: #e9c046;
+}
+
+.tok-ns {
+  color: var(--muted);
+}
+
+.tok-comment {
+  color: var(--muted);
+  font-style: italic;
+}
+
+:root[data-theme='day'] .tok-num {
+  color: #9a6b00;
+}
+
+/* ---------- canvas extras ---------- */
+
+.toolbar .time.warn {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.crumbs {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 24px);
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: var(--glass);
+  backdrop-filter: blur(14px);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.crumbs.has-back {
+  padding-left: 4px;
+}
+
+.crumb {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+button.crumb {
+  cursor: pointer;
+}
+
+button.crumb:hover {
+  color: var(--text);
+}
+
+.crumb.here {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.crumb-sep {
+  color: var(--faint);
+}
+
+.crumb-back {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transform: scaleX(-1);
+}
+
+.crumb-back:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.crumb-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 4px;
+  padding: 1px 6px 1px 4px;
+  border-radius: 5px;
+  background: var(--text);
+  color: var(--on-text);
+  font-size: 11px;
+  font-weight: 500;
+}
