@@ -13,6 +13,8 @@ export interface Loaded {
 
 export interface Settings {
   robot?: Record<string, number>;
+  /** how this field was built: each loader's offset from the manual's 12 in, by id (src/editor/targets.ts) */
+  field?: { loaderOffsets?: Record<string, number> };
 }
 
 export interface PendingWrite {

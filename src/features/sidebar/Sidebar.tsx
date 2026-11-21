@@ -4,6 +4,7 @@ import type { Theme } from '../../hooks/useTheme';
 import { ROBOT_FIELDS, type RobotConfig } from '../../robot/config';
 import { CRIMSON_PROFILE } from '../../profiles/crimson';
 import { store } from '../../editor/store';
+import { LOADERS, LOADER_NOMINAL, type LoaderOffsets } from '../../editor/targets';
 import { Icon, IconButton } from '../../components/Icon';
 import { NumberField } from '../../components/Controls';
 import { MenuButton } from '../../components/Menu';
@@ -64,6 +65,7 @@ export function Sidebar({
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const [dropOn, setDropOn] = useState<string | null>(null);
   const [robotOpen, setRobotOpen] = useState(false);
+  const [fieldOpen, setFieldOpen] = useState(false);
   const { focus, autons, paths } = lib;
 
   const current = lib.currentAutonName;
@@ -270,16 +272,57 @@ export function Sidebar({
 
       <div className="panel-foot">
         <RobotSection robot={lib.robot} setRobot={lib.setRobot} open={robotOpen} onToggle={() => setRobotOpen(!robotOpen)} />
+        <FieldDrawer offsets={lib.loaderOffsets} setOffset={lib.setLoaderOffset} open={fieldOpen} />
         <div className="section-head">
           <span>Field</span>
           <span className="head-actions">
+            {Object.keys(lib.loaderOffsets).length > 0 && (
+              <IconButton icon="x" title="Loaders back where the manual puts them (12 in from the corner)"
+                onClick={() => lib.setLoaderOffset(Object.fromEntries(Object.keys(LOADERS).map(id => [id, 0])))} />
+            )}
             <IconButton icon="grid" title={grid ? 'Hide 6 in grid (G)' : 'Show 6 in grid (G)'} active={grid} onClick={onToggleGrid} />
             <IconButton icon="speed" title={speedColors ? 'Plain ghost trail (V)' : 'Color the ghost trail by speed (V)'}
               active={speedColors} onClick={onToggleSpeedColors} />
+            <IconButton icon="sliders" title="Loader offsets: for a field whose loaders aren't where the manual puts them"
+              active={fieldOpen} onClick={() => setFieldOpen(!fieldOpen)} />
           </span>
         </div>
       </div>
     </aside>
+  );
+}
+
+const LOADER_OFFSET_LIMIT = 10; // in either way: past that it's not a loader that was bolted on a little off
+
+/**
+ * How this field was built: each loader's offset from where the manual puts it (12 in from the corner, along its wall).
+ * Moving one moves its glow, its drawing and every point snapped to it, so the code drives to the loader as built.
+ */
+function FieldDrawer({ offsets, setOffset, open }: {
+  offsets: LoaderOffsets;
+  setOffset: (patch: LoaderOffsets) => void;
+  open: boolean;
+}) {
+  const order = ['loader-blue-bottom', 'loader-blue-top', 'loader-red-top', 'loader-red-bottom'];
+  return (
+    <div className={`drawer ${open ? 'open' : ''}`} inert={!open} aria-hidden={!open}>
+      <div className="drawer-inner">
+        <div className="grid-2 drawer-body">
+          <span className="drawer-label" title={`The manual centres each loader ${LOADER_NOMINAL} in from the corner along its wall. Measure this field's and put in how far off it is: + is farther from the corner. Left and right are as seen from that alliance's driver station.`}>
+            Loader offsets (0 = {LOADER_NOMINAL} in from the corner)
+          </span>
+          {order.map(id => {
+            const off = offsets[id] ?? 0;
+            const name = LOADERS[id].name;
+            return (
+              <NumberField key={id} label={name[0].toUpperCase() + name.slice(1)} suffix="in" step={0.25} value={off}
+                title={`${name} loader: ${Math.round((LOADER_NOMINAL + off) * 100) / 100} in from the corner (${LOADER_NOMINAL} + ${off}); points on it move with it`}
+                onChange={v => v != null && setOffset({ [id]: Math.max(-LOADER_OFFSET_LIMIT, Math.min(LOADER_OFFSET_LIMIT, v)) })} />
+            );
+          })}
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -80,15 +80,36 @@ export function appendPoint(def: PathDefinition): PathDefinition {
   return withPoints(def, [...def.points, { ...clampToField(last.x + 12, last.y), theta: null }]);
 }
 
-/** Turn the path 180 degrees about the field centre. Doing it twice gives back the same path. */
+/**
+ * Turn the path 180 degrees about the field centre. Doing it twice gives back the same path. A snapped point lands on
+ * the twin spot where this field has it (the twin loader may be offset differently).
+ */
 export function rotate180(def: PathDefinition): PathDefinition {
-  return withPoints(def, def.points.map(p => ({
-    ...p,
-    x: round2(FIELD_SIZE - p.x),
-    y: round2(FIELD_SIZE - p.y),
-    theta: p.theta != null ? wrapDeg(p.theta + 180) : p.theta,
-    ...(p.target ? { target: mirrorTarget(p.target) } : {}),
-  })));
+  return withPoints(def, def.points.map(p => {
+    const twin = p.target ? targetById(mirrorTarget(p.target)) : null;
+    return {
+      ...p,
+      x: twin ? twin.x : round2(FIELD_SIZE - p.x),
+      y: twin ? twin.y : round2(FIELD_SIZE - p.y),
+      theta: p.theta != null ? wrapDeg(p.theta + 180) : p.theta,
+      ...(p.target ? { target: twin?.id ?? null } : {}),
+    };
+  }));
+}
+
+/**
+ * Puts snapped points on their spots, wherever this field has them (a loader offset moves its loader). The same path
+ * comes back when nothing moved, so the ghost's caches keep it.
+ */
+export function syncSpots(def: PathDefinition): PathDefinition {
+  let moved = false;
+  const points = def.points.map(p => {
+    const t = targetById(p.target);
+    if (!t || (p.x === t.x && p.y === t.y)) return p;
+    moved = true;
+    return { ...p, x: t.x, y: t.y };
+  });
+  return moved ? { ...def, points } : def;
 }
 
 /** A step's path as the auton drives it (turned when the step says so). */

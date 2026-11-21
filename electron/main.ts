@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
  * Autons and paths live in Documents/PointWeaver, one JSON file each:
  *   paths/<name>.json    a path: points and LemLib settings
  *   autons/<name>.json   an auton: the paths it runs, in order
- *   settings.json        robot size and speed for the ghost
+ *   settings.json        robot size and speed for the ghost, and the field's loader offsets
  */
 
 type Kind = "path" | "auton";

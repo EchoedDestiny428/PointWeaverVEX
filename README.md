@@ -28,6 +28,7 @@ The app isn't code-signed, so Windows may say *"Windows protected your PC"*. Cli
 4. The goals, pins and loaders glow. Drag or double-click a point near one and it snaps there (hold **Ctrl** to place it freely):
    - **Goal**: the robot's centre drives to the goal's centre. It clips into the goal, so the code then waits and calls `chassis.setPoseFromGoal` with `.distance` set to **Goal** (7.5 in, robot centre to goal centre, under **Robot**). That puts the robot back where it really is, against the goal. You can switch the reset off per point. The ghost does the same reset, so it jumps back out of the goal (a dashed hop on the field), and the next move starts from there. A donut orbits the goal at that distance, so the robot ends up round the goal (the arc on the field) and the next move starts there. A path whose point 0 is at a goal starts the robot against it the same way: 7.5 in from the goal's centre along the start heading. **Back against the goal** on point 0 puts the goal behind the robot (off: in front). A later path in an auton that starts at a goal drives into it and resets from it, unless the robot is already there.
    - **Pin or loader**: the robot stops where its claw's centre is on the spot. That's **Claw** (16 cm = 6.3 in) in front of the robot's centre, set under **Robot**. The robot faces the point's heading, or else the way it drives in.
+   - **Loader offsets**: not every field is built right. The manual centres each loader 12 in from the corner along its wall. Open the sliders on **Field** and type how far off each loader is on this field (0 = 12 in, +0.5 = 12.5 in, farther from the corner). Left and right are as seen from that alliance's driver station. The loader moves, and so does every point snapped to it, so the code drives to the loader as built. The offsets are saved with the robot settings. The **×** puts them all back to 0.
 5. Click a point to edit it on the right. Turn its heading on, then choose what happens there:
    - **Drive into**: `chassis.moveToPose`, arriving at that heading.
    - **Turn**: `chassis.moveToPoint`, then `chassis.turnToHeading` in place.
@@ -101,7 +102,7 @@ chassis.moveToPoint(24, 48, 1050, {.forwards = false}); // blue goal 2
 chassis.waitUntilDone();
 chassis.setPoseFromGoal(24, 48, {.distance = 7.5});
 chassis.moveToPoint(43.97, 52.84, 1750); // claw on yellow pin (48, 48)
-chassis.moveToPoint(5.67, 17.79, 800); // claw on blue loader (2.4, 12.4)
+chassis.moveToPoint(5.67, 17.79, 800); // claw on blue right loader (2.4, 12.4)
 chassis.waitUntil(17.67);
 chassis.cancelMotion();
 chassis.moveToPoint(5.67, 17.79, 650, {.maxSpeed = 40}); // last 50%
@@ -123,7 +124,7 @@ Everything is plain JSON in `Documents\PointWeaver`. Click the folder button at 
 Documents\PointWeaver\
   autons\<name>.json   the paths an auton runs, in order: [{ "path": "corner rush", "rotate": true }, ...]
   paths\<name>.json    a path's points and LemLib settings
-  settings.json        the ghost's robot size and speed
+  settings.json        the ghost's robot size and speed, and this field's loader offsets
 ```
 
 Autons refer to paths by name, so renaming a path in the app updates every auton that uses it. In a plain browser (`npm run dev`), everything is kept in the browser's storage instead.

@@ -11,7 +11,7 @@ import {
   actionOf, arrivals, clampToField, donutAt, headingVector, insertPoint, offsetPoints, removePoint, resolveParams, restOf,
   round1, shownHeading, startOf, updatePoint, updatePointParams, wrapDeg, type Arrival, type PointStart,
 } from '../../editor/pathOps';
-import { TARGETS, targetById, type Target } from '../../editor/targets';
+import { TARGETS, currentField, targetById, type Target } from '../../editor/targets';
 import { LEAD_IN_GAP } from '../../editor/codegen';
 import { drawField } from './fieldArt';
 
@@ -348,7 +348,7 @@ export function FieldCanvas(props: Props) {
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, w, h);
 
-    drawField(ctx, toScreen, v.scale, theme);
+    drawField(ctx, toScreen, v.scale, theme, currentField());
     const [fx, fy] = toScreen(0, FIELD_SIZE);
     const fs = FIELD_SIZE * v.scale;
 

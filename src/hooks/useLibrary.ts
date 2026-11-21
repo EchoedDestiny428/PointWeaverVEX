@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AutonDefinition, AutonStep, Library, PathDefinition } from '../editor/types';
 import { NAME_RE } from '../editor/types';
-import { rotate180 } from '../editor/pathOps';
-import { targetById } from '../editor/targets';
+import { rotate180, syncSpots } from '../editor/pathOps';
+import { setLoaderOffsets, targetById, type LoaderOffsets } from '../editor/targets';
 import { store, type DocKind, type Settings } from '../editor/store';
 import { CRIMSON_PROFILE } from '../profiles/crimson';
 import type { RobotConfig } from '../robot/config';
@@ -86,6 +86,14 @@ export function useLibrary() {
   const [lib, setLibState] = useState<Library>({ paths: {}, autons: {} });
   const libRef = useRef(lib);
   const setLib = (next: Library) => {
+    // snapped points stay on their spots, even ones coming back from undo after a loader moved
+    let moved = false;
+    const paths = Object.fromEntries(Object.entries(next.paths).map(([k, v]) => {
+      const synced = syncSpots(v);
+      moved ||= synced !== v;
+      return [k, synced];
+    }));
+    if (moved) next = { ...next, paths };
     libRef.current = next;
     setLibState(next);
   };
@@ -98,7 +106,10 @@ export function useLibrary() {
   const setSelectedIndex = (i: number | null) => setSelection(i == null ? [] : [i]);
 
   const [robot, setRobotState] = useState<RobotConfig>(CRIMSON_PROFILE.robot);
-  const robotTimer = useRef<number | undefined>(undefined);
+  const robotRef = useRef(robot);
+  const [loaderOffsets, setLoaderOffsetsState] = useState<LoaderOffsets>({});
+  const loaderOffsetsRef = useRef(loaderOffsets);
+  const settingsTimer = useRef<number | undefined>(undefined);
 
   // unsaved documents ("path:name" / "auton:name"), each with its pending write
   const timers = useRef(new Map<string, number>());
@@ -158,11 +169,19 @@ export function useLibrary() {
       try {
         const res = await store.load();
         if (cancelled) return;
+        // before the paths: their snapped points go where this field has the loaders
+        const offsets = res.settings?.field?.loaderOffsets ?? {};
+        setLoaderOffsets(offsets);
+        loaderOffsetsRef.current = offsets;
+        setLoaderOffsetsState(offsets);
         const paths = Object.fromEntries(Object.entries(res.paths ?? {}).map(([k, v]) => [k, cleanPath(v)]));
         const autons = Object.fromEntries(Object.entries(res.autons ?? {}).map(([k, v]) => [k, cleanAuton(v)]));
         setLib({ paths, autons });
         setDir(res.dir);
-        if (res.settings?.robot) setRobotState({ ...CRIMSON_PROFILE.robot, ...res.settings.robot });
+        if (res.settings?.robot) {
+          robotRef.current = { ...CRIMSON_PROFILE.robot, ...res.settings.robot };
+          setRobotState(robotRef.current);
+        }
         if (res.skipped?.length) alert(`Skipped unreadable files:\n${res.skipped.join('\n')}`);
         // reopen what was open last time, if it's still there
         const f = readFocus();
@@ -496,18 +515,31 @@ export function useLibrary() {
     if (autonOf(focusRef.current) === name) setFocus(null);
   };
 
-  // ---------- robot ----------
+  // ---------- settings: the robot, and how the field was built ----------
+
+  const saveSettingsSoon = () => {
+    window.clearTimeout(settingsTimer.current);
+    settingsTimer.current = window.setTimeout(() => {
+      const settings: Settings = { robot: { ...robotRef.current }, field: { loaderOffsets: { ...loaderOffsetsRef.current } } };
+      store.writeSettings(settings).catch(e => console.error('settings write failed', e));
+    }, SAVE_DELAY);
+  };
 
   const setRobot = (patch: Partial<RobotConfig>) => {
-    setRobotState(r => {
-      const next = { ...r, ...patch };
-      window.clearTimeout(robotTimer.current);
-      robotTimer.current = window.setTimeout(() => {
-        const settings: Settings = { robot: { ...next } };
-        store.writeSettings(settings).catch(e => console.error('settings write failed', e));
-      }, SAVE_DELAY);
-      return next;
-    });
+    robotRef.current = { ...robotRef.current, ...patch };
+    setRobotState(robotRef.current);
+    saveSettingsSoon();
+  };
+
+  /** Moves loaders (offsets from the manual's 12 in, by id); points snapped to them move along. */
+  const setLoaderOffset = (patch: LoaderOffsets) => {
+    const next = { ...loaderOffsetsRef.current, ...patch };
+    for (const [id, v] of Object.entries(next)) if (!v) delete next[id];
+    setLoaderOffsets(next);
+    loaderOffsetsRef.current = next;
+    setLoaderOffsetsState(next);
+    setLib(libRef.current); // re-sync snapped points
+    saveSettingsSoon();
   };
 
   return {
@@ -545,6 +577,8 @@ export function useLibrary() {
     deleteAuton,
     robot,
     setRobot,
+    loaderOffsets,
+    setLoaderOffset,
   };
 }
 
