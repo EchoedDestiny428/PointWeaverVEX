@@ -6,6 +6,8 @@ export interface RobotConfig {
   acceleration: number;
   maxTurnRate: number;
   turnAcceleration: number;
+  /** robot centre to the claw's centre, forward (in) */
+  clawOffset: number;
 }
 
 export const ROBOT_FIELDS: Array<{ key: keyof RobotConfig; label: string; unit: string; min: number; max: number; step: number }> = [
@@ -16,4 +18,5 @@ export const ROBOT_FIELDS: Array<{ key: keyof RobotConfig; label: string; unit: 
   { key: "acceleration", label: "Acceleration", unit: "in/s²", min: 20, max: 600, step: 10 },
   { key: "maxTurnRate", label: "Turn rate", unit: "°/s", min: 60, max: 1200, step: 10 },
   { key: "turnAcceleration", label: "Turn acceleration", unit: "°/s²", min: 200, max: 6000, step: 50 },
+  { key: "clawOffset", label: "Claw offset (robot centre to claw centre)", unit: "in", min: 0, max: 15, step: 0.1 },
 ];

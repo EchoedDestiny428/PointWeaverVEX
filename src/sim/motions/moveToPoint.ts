@@ -4,6 +4,7 @@ import type { Vec2 } from "../../core/geometry";
 import type { RobotConfig } from "../../robot/config";
 import { approach, integrate, speedFraction } from "../kinematics";
 import type { DriveState } from "../kinematics";
+import { LARGE_EXIT_RANGE, LargeExit } from "./types";
 import type { Motion, MotionStatus } from "./types";
 
 export interface MoveToPointParams {
@@ -46,6 +47,7 @@ export class MoveToPoint implements Motion {
   traveled = 0;
   readonly keepsMoving: boolean;
   private startDirection: Vec2 | null = null;
+  private readonly largeExit = new LargeExit();
 
   constructor(
     readonly target: Vec2,
@@ -63,7 +65,7 @@ export class MoveToPoint implements Motion {
     }
     const exitRange = this.params.minSpeed > 0 ? Math.max(this.params.earlyExitRange, 1) : STOP_RANGE;
     const passed = remaining < PASSED_CHECK_RANGE && dot(toTarget, this.startDirection) <= 0;
-    if (remaining <= exitRange || passed) {
+    if (remaining <= exitRange || passed || this.largeExit.update(remaining <= LARGE_EXIT_RANGE, dt)) {
       return "done";
     }
     driveToward(state, this.target, dt, robot, this.params, remaining);

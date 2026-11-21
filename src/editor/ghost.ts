@@ -3,7 +3,8 @@ import { CRIMSON_PROFILE } from '../profiles/crimson';
 import type { RobotConfig } from '../robot/config';
 import { parseCpp, pickRoutine } from '../program/cppParser';
 import { simulate } from '../sim/runtime';
-import { flatProgram, type FrameMap, type LineSource, type Pose, type SimStep } from './codegen';
+import { estimateKey, flatProgram, type Estimates, type FrameMap, type LineSource, type Pose, type SimStep } from './codegen';
+import type { PathDefinition } from './types';
 import { FIELD_SIZE } from './types';
 
 /**
@@ -36,20 +37,55 @@ export const EMPTY_GHOST: Ghost = { poses: [], duration: 0, timeouts: [] };
 /** Every simulated frame is kept up to this rate; the drawn trail and playback don't need more. */
 const KEEP_EVERY_S = 0.02;
 
-export function simulateSteps(steps: SimStep[], robot: RobotConfig, periodSeconds: number): Ghost {
-  if (!steps.some(s => s.def.points.length > 1)) return EMPTY_GHOST;
-  const { code, sources } = flatProgram(steps, toSimFrame);
+const run = (code: string, robot: RobotConfig, periodSeconds: number) => {
   const routine = pickRoutine(parseCpp(code));
-  if (!routine) return EMPTY_GHOST;
-  const sim = simulate(routine.body, {
+  if (!routine) return null;
+  return simulate(routine.body, {
     field: DEFAULT_FIELD,
     profile: CRIMSON_PROFILE,
     robot,
     mechanismOverrides: {},
-    // let it run past the time limit so the whole path shows; the toolbar says when it's over
-    periodSeconds: Math.max(periodSeconds * 4, 120),
+    periodSeconds,
     obstacles: { walls: false, goals: false, loaders: false, elements: false },
   });
+};
+
+/** A suggested timeout from a call's ghost time: a quarter more, plus 100 ms, rounded up to 50 ms. */
+export const estimateFromSeconds = (seconds: number) => Math.ceil((seconds * 1000 * 1.25 + 100) / 50) * 50;
+
+const estimateCache = new WeakMap<PathDefinition, { robot: RobotConfig; estimates: Estimates }>();
+
+/**
+ * How long each call of a path takes in the ghost (as a suggested timeout, ms), run on its own from point 0 with
+ * long timeouts. Calls that never finish get no estimate. Cached per path object and robot.
+ */
+export function estimatesFor(def: PathDefinition, robot: RobotConfig): Estimates {
+  const hit = estimateCache.get(def);
+  if (hit && hit.robot === robot) return hit.estimates;
+  const estimates = new Map<string, number>();
+  if (def.points.length > 1) {
+    const { code, sources } = flatProgram([{ def }], toSimFrame, { clawOffset: robot.clawOffset, measure: true });
+    const sim = run(code, robot, 300);
+    for (const e of sim?.timeline ?? []) {
+      const src = sources.get(e.line);
+      if (e.kind !== 'motion' || !src || (e.status !== 'done' && e.status !== 'cancelled')) continue;
+      if (src.call !== 'move' && src.call !== 'slow' && src.call !== 'turn') continue;
+      estimates.set(estimateKey(src.point, src.call), estimateFromSeconds(e.end - e.start));
+    }
+  }
+  estimateCache.set(def, { robot, estimates });
+  return estimates;
+}
+
+export function simulateSteps(steps: SimStep[], robot: RobotConfig, periodSeconds: number): Ghost {
+  if (!steps.some(s => s.def.points.length > 1)) return EMPTY_GHOST;
+  const { code, sources } = flatProgram(steps, toSimFrame, {
+    clawOffset: robot.clawOffset,
+    estimates: def => estimatesFor(def, robot),
+  });
+  // let it run past the time limit so the whole path shows; the toolbar says when it's over
+  const sim = run(code, robot, Math.max(periodSeconds * 4, 120));
+  if (!sim) return EMPTY_GHOST;
 
   const every = Math.max(1, Math.round(KEEP_EVERY_S / sim.dt));
   const poses: GhostPose[] = [];

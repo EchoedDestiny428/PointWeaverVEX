@@ -5,6 +5,7 @@ import type { RobotConfig } from "../../robot/config";
 import { approach, integrate, speedFraction } from "../kinematics";
 import type { DriveState } from "../kinematics";
 import { driveToward } from "./moveToPoint";
+import { LARGE_EXIT_RANGE, LargeExit } from "./types";
 import type { Motion, MotionStatus } from "./types";
 
 export interface MoveToPoseParams {
@@ -22,6 +23,7 @@ const HEADING_DONE = 2;
 export class MoveToPose implements Motion {
   traveled = 0;
   readonly keepsMoving: boolean;
+  private readonly largeExit = new LargeExit();
 
   constructor(
     readonly target: Pose,
@@ -39,6 +41,10 @@ export class MoveToPose implements Motion {
       return "done";
     }
     if (remaining <= POSITION_DONE && Math.abs(headingError) <= HEADING_DONE) {
+      return "done";
+    }
+    // settled close by, facing the right way, but short of the tight range: LemLib's large-error exit ends it
+    if (this.largeExit.update(remaining <= LARGE_EXIT_RANGE && Math.abs(headingError) <= HEADING_DONE * 1.5, dt)) {
       return "done";
     }
 

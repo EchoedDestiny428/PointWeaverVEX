@@ -38,6 +38,12 @@ export interface MoveParams {
   donutSlow?: number | null;
   /** donut: orbit a point behind the robot (forwards = false). Unset = the move's own direction. */
   donutBehind?: boolean | null;
+  /** slow down for this last part of the move (0-1): waitUntil, cancelMotion, then the same move at slowSpeed */
+  slowdown?: number | null;
+  /** 0-127, max speed for the slow part */
+  slowSpeed?: number | null;
+  /** at a goal: chassis.setPoseFromGoal once there (unset = on) */
+  goalReset?: boolean | null;
 }
 
 export interface PathPoint {
@@ -45,8 +51,10 @@ export interface PathPoint {
   y: number;
   /** heading target (deg); null = translation only (moveToPoint). On point 0 it's the start heading. */
   theta?: number | null;
-  /** what to do with theta; unset = 'pose' */
+  /** what to do with theta; unset = 'pose'. A donut needs a goal. */
   action?: HeadingAction | null;
+  /** snapped to a goal, pin or loader (src/editor/targets.ts); x/y are then that spot */
+  target?: string | null;
   params?: MoveParams | null;
 }
 
@@ -89,4 +97,5 @@ export const DEFAULTS = {
   earlyExitRange: 0,
   donutFast: 100,
   donutSlow: 75,
+  slowSpeed: 50,
 } as const;

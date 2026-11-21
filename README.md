@@ -24,21 +24,27 @@ The app isn't code-signed, so Windows may say *"Windows protected your PC"*. Cli
 1. Click **+** next to **Autons** and name it.
 2. Click **+** next to **Paths** on the right, then **New path…**. The path goes into the auton and opens.
 3. Double-click the field to add points. Point 0 is where the path starts, and the robot drives to each point after it.
-4. Click a point to edit it on the right. Turn its heading on, then choose what happens there:
+   While you drag a point, the robot is drawn where that point puts it, in red if it would hit the wall.
+4. The goals, pins and loaders glow. Drag or double-click a point near one and it snaps there (hold **Ctrl** to place it freely):
+   - **Goal**: the robot's centre drives to the goal's centre. It clips into the goal, so the code then waits and calls `chassis.setPoseFromGoal` (you can switch that off per point).
+   - **Pin or loader**: the robot stops where its claw's centre is on the spot. That's **Claw** (16 cm = 6.3 in) in front of the robot's centre, set under **Robot**. The robot faces the point's heading, or else the way it drives in.
+5. Click a point to edit it on the right. Turn its heading on, then choose what happens there:
    - **Drive into**: `chassis.moveToPose`, arriving at that heading.
    - **Turn**: `chassis.moveToPoint`, then `chassis.turnToHeading` in place.
-   - **Donut**: `chassis.moveToPoint`, then `chassis.donut`, Crimson's orbit turn.
+   - **Donut**: `chassis.moveToPoint`, then `chassis.donut`, Crimson's orbit turn. Only at a goal.
 
    With the heading off, the point is a plain `chassis.moveToPoint`. Turns and donuts have their own timeout, separate from the move's.
-5. Open the auton in the sidebar to see all of its paths. Add a path you already have with **+** in the auton's path list, or drag it in from **Paths** on the left. Click ↻ on a path to turn that use 180° about the field centre. The goals are placed point-symmetrically, so a move made on blue's half works the same way on red's half.
-6. Open **Output code** and click the copy button.
+6. **Slow down for the last** (a slider on the point, or drag the diamond on the field) drives the last part of a move at **Slow max**.
+7. Open the auton in the sidebar to see all of its paths. Add a path you already have with **+** in the auton's path list, or drag it in from **Paths** on the left. Click ↻ on a path to turn that use 180° about the field centre. The goals are placed point-symmetrically, so a move made on blue's half works the same way on red's half.
+8. Open **Output code** and click the copy button.
 
 Editing a path changes it in every auton that uses it, including the turned uses. You can edit a turned use where it sits on the field. The sidebar shows how many times each path is used.
 
 | Control | Action |
 | --- | --- |
 | Double-click the field | Adds a point (on a segment, it goes between those two points) |
-| Drag a point / its heading handle | Moves it / turns it (hold **Shift** to snap to 15°, **Alt** to snap to the 6 in grid) |
+| Drag a point / its heading handle | Moves it / turns it (it snaps to goals, pins and loaders; hold **Ctrl** not to, **Alt** to snap to the 6 in grid, **Shift** to turn in 15° steps) |
+| Drag the diamond on a move | Sets where its slowdown starts |
 | Scroll over the selected point | Turns its heading 5° |
 | **Shift**-click a point | Deletes it |
 | **Shift**-drag on the field | Selects a group to move together |
@@ -54,7 +60,7 @@ Editing a path changes it in every auton that uses it, including the turned uses
 
 The toolbar shows the ghost's run time. It turns bold with a ⚠ when the run is over the limit (15 s, or 60 s with **Skills** on), or when a move hits its timeout. That point gets a dashed ring.
 
-**Robot** (bottom left) sets the ghost's size and speed. It only changes the ghost, not the code.
+**Robot** (bottom left) sets the ghost's size and speed, and the claw offset. Only the claw offset changes the code.
 
 ## Output code
 
@@ -79,6 +85,23 @@ void run() {
 ```
 
 Settings that are left at LemLib's default stay out of the call. Each point can set **Timeout** (ms), **Exit** (`earlyExitRange`, in), **Max** and **Min** speed (0–127) and **Reverse** (`forwards = false`). Leave a box empty to use the path's default. Set the path's defaults with no point selected.
+
+**Timeouts are estimated.** A timeout box left empty (on the point and the path) shows a greyed number: the ghost's time for that call, plus a quarter, plus 100 ms, rounded up to 50 ms. That's what the code uses. Type a number to override it.
+
+A goal, a pin and a slowdown look like this:
+
+```cpp
+chassis.moveToPoint(24, 48, 1050, {.forwards = false}); // blue goal 2
+chassis.waitUntilDone();
+chassis.setPoseFromGoal(24, 48);
+chassis.moveToPoint(43.97, 52.84, 1750); // claw on yellow pin (48, 48)
+chassis.moveToPoint(5.67, 17.79, 800); // claw on blue loader (2.4, 12.4)
+chassis.waitUntil(17.67);
+chassis.cancelMotion();
+chassis.moveToPoint(5.67, 17.79, 650, {.maxSpeed = 40}); // last 50%
+```
+
+The ghost skips `setPoseFromGoal`, so its trail stays drawn into the goal.
 
 **Set pose at start** on a path adds a `chassis.setPose` at its point 0, for re-localising partway through an auton.
 

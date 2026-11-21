@@ -476,3 +476,60 @@ button.crumb:hover {
   font-size: 11px;
   font-weight: 500;
 }
+
+/* ---------- snapping to goals, pins and loaders ---------- */
+
+.snapped {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 2px 0 10px;
+  border: 1px solid rgba(255, 207, 77, 0.35);
+  border-radius: 6px;
+  background: rgba(255, 207, 77, 0.06);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.snapped .icon-btn {
+  width: 24px;
+  height: 24px;
+}
+
+.glow-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: #ffcf4d;
+  box-shadow: 0 0 6px 2px rgba(255, 207, 77, 0.55);
+}
+
+.point-row .idx.snapped-idx {
+  color: #e0a800;
+  font-weight: 600;
+}
+
+:root[data-theme='day'] .snapped {
+  border-color: rgba(217, 154, 0, 0.45);
+  background: rgba(217, 154, 0, 0.07);
+}
+
+:root[data-theme='day'] .glow-dot {
+  background: #d99a00;
+  box-shadow: 0 0 5px 1px rgba(217, 154, 0, 0.5);
+}
+
+.readout.est {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.readout.est .num {
+  height: 30px;
+  display: flex;
+  align-items: center;
+}

@@ -275,7 +275,7 @@ function RobotSection({ robot, setRobot, open, onToggle }: {
   const d = CRIMSON_PROFILE.robot;
   const short: Record<keyof RobotConfig, string> = {
     width: 'Width', length: 'Length', trackWidth: 'Track', maxSpeed: 'Speed', acceleration: 'Accel',
-    maxTurnRate: 'Turn', turnAcceleration: 'Turn accel',
+    maxTurnRate: 'Turn', turnAcceleration: 'Turn accel', clawOffset: 'Claw',
   };
   const changed = ROBOT_FIELDS.some(f => robot[f.key] !== d[f.key]);
   return (
@@ -296,7 +296,7 @@ function RobotSection({ robot, setRobot, open, onToggle }: {
         <span>Robot</span>
         <span className="head-actions">
           {changed && <IconButton icon="x" title="Back to Crimson's numbers" onClick={() => setRobot({ ...d })} />}
-          <IconButton icon="sliders" title="Robot size and speed (ghost only)" active={open} onClick={onToggle} />
+          <IconButton icon="sliders" title="Robot size and speed for the ghost, and the claw offset (used in the code)" active={open} onClick={onToggle} />
         </span>
       </div>
     </>

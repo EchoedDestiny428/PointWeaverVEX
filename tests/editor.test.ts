@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { CRIMSON_PROFILE } from '../src/profiles/crimson';
-import { autonCode, cppName, flatProgram, num, pathCode } from '../src/editor/codegen';
-import { fromSimFrame, poseAt, simulateSteps, toSimFrame } from '../src/editor/ghost';
-import { resolveParams, rotate180, stepGap, wrapDeg } from '../src/editor/pathOps';
+import { autonCode, cppName, flatProgram, num, pathCode, type CodeOptions } from '../src/editor/codegen';
+import { estimateFromSeconds, estimatesFor, fromSimFrame, poseAt, simulateSteps, toSimFrame } from '../src/editor/ghost';
+import { arrivals, resolveParams, rotate180, stepGap, wrapDeg } from '../src/editor/pathOps';
+import { mirrorTarget, targetById } from '../src/editor/targets';
 import type { AutonDefinition, PathDefinition } from '../src/editor/types';
+
+const robot = CRIMSON_PROFILE.robot;
+const opts: CodeOptions = { clawOffset: 6.3 };
 
 const path = (points: PathDefinition['points'], extra: Partial<PathDefinition> = {}): PathDefinition => ({
   points,
@@ -39,7 +43,8 @@ describe('path operations', () => {
 
   it('fills settings from the point, then the path, then LemLib', () => {
     const r = resolveParams({ timeout: 1500, maxSpeed: 90 }, { maxSpeed: 60, reverse: true });
-    expect(r).toMatchObject({ timeout: 1500, maxSpeed: 60, minSpeed: 0, reverse: true, turnTimeout: 1000, donutBehind: true });
+    // timeouts nobody set stay empty: the code fills them from the ghost's estimates
+    expect(r).toMatchObject({ timeout: 1500, maxSpeed: 60, minSpeed: 0, reverse: true, turnTimeout: null, donutBehind: true });
   });
 
   it('measures the gap between steps', () => {
@@ -48,6 +53,39 @@ describe('path operations', () => {
     expect(stepGap(auton, paths, 0)).toBeNull();
     expect(stepGap(auton, paths, 1)).toBeCloseTo(3);
   });
+
+  it('places goals, pins and loaders in the Crimson frame and pairs them across the field', () => {
+    expect(targetById('goal-blue-2')).toMatchObject({ kind: 'goal', x: 24, y: 48, label: 'blue goal 2' });
+    expect(targetById('goal-red-3')).toMatchObject({ x: 96, y: 120 });
+    expect(targetById('cup-yellow-2')).toMatchObject({ kind: 'pin', x: 48, y: 48 });
+    expect(targetById('loader-red-top')?.x).toBeGreaterThan(140);
+    expect(mirrorTarget('goal-blue-2')).toBe('goal-red-2');
+    expect(mirrorTarget('goal-1a')).toBe('goal-1b');
+    expect(mirrorTarget('cup-pin-top')).toBe('cup-pin-bottom');
+    expect(mirrorTarget('loader-red-top')).toBe('loader-blue-bottom');
+    // crosses and plain wall cups aren't claw spots
+    expect(targetById('cross-1')).toBeNull();
+    expect(targetById('wall-cup-0-a')).toBeNull();
+  });
+
+  it('keeps a turned path on the matching spots', () => {
+    const p = path([{ x: 18, y: 72, theta: 0 }, { x: 24, y: 48, target: 'goal-blue-2' }]);
+    expect(rotate180(p).points[1]).toMatchObject({ x: 120, y: 96, target: 'goal-red-2' });
+    expect(rotate180(rotate180(p)).points).toEqual(p.points);
+  });
+
+  it('stops short of a pin so the claw is on it', () => {
+    // driving straight at it along +X: the centre stops one claw offset before it
+    const straight = arrivals(path([{ x: 18, y: 48, theta: 0 }, { x: 48, y: 48, target: 'cup-yellow-2' }]), 6.3);
+    expect(straight[1].x).toBeCloseTo(41.7);
+    expect(straight[1].y).toBeCloseTo(48);
+    // arriving at heading -90 (facing +Y): the centre is below the pin
+    const posed = arrivals(path([{ x: 18, y: 30, theta: 0 }, { x: 48, y: 48, theta: -90, target: 'cup-yellow-2' }]), 6.3);
+    expect(posed[1].x).toBeCloseTo(48);
+    expect(posed[1].y).toBeCloseTo(41.7);
+    // goals take the centre all the way in
+    expect(arrivals(path([{ x: 18, y: 48 }, { x: 24, y: 48, target: 'goal-blue-2' }]), 6.3)[1]).toMatchObject({ x: 24, y: 48 });
+  });
 });
 
 describe('code', () => {
@@ -55,24 +93,61 @@ describe('code', () => {
     { x: 18, y: 72, theta: 0 },
     { x: 48, y: 72, theta: null },
     { x: 48, y: 48, theta: -90, params: { reverse: true, maxSpeed: 90, earlyExitRange: 4 } },
-    { x: 24, y: 48, theta: 180, action: 'turn', params: { turnTimeout: 800, turnDirection: 'cw' } },
-    { x: 24, y: 30, theta: 90, action: 'donut', params: { donutFast: 127, donutSlow: 30, reverse: true } },
+    { x: 36, y: 40, theta: 180, action: 'turn', params: { turnTimeout: 800, turnDirection: 'cw' } },
+    { x: 48, y: 24, target: 'goal-blue-3', theta: 90, action: 'donut', params: { donutFast: 127, donutSlow: 30, reverse: true } },
   ], { params: { timeout: 1500 } });
 
-  it('uses moveToPose for a heading and moveToPoint without one', () => {
-    expect(pathCode('Score', score)).toBe([
+  it('uses moveToPose for a heading and moveToPoint without one, and resets at a goal before a donut', () => {
+    expect(pathCode('Score', score, opts)).toBe([
       '// Score, made in PointWeaver.',
       "// Field frame: (0, 0) is the corner on blue's right, +X toward red, heading 0 faces red, clockwise. Inches.",
       '',
       'void score() {',
       '    chassis.moveToPoint(48, 72, 1500);',
       '    chassis.moveToPose(48, 48, -90, 1500, {.forwards = false, .maxSpeed = 90, .earlyExitRange = 4});',
-      '    chassis.moveToPoint(24, 48, 1500);',
+      '    chassis.moveToPoint(36, 40, 1500);',
       '    chassis.turnToHeading(180, 800, {.direction = lemlib::AngularDirection::CW_CLOCKWISE});',
-      '    chassis.moveToPoint(24, 30, 1500, {.forwards = false});',
+      '    chassis.moveToPoint(48, 24, 1500, {.forwards = false}); // blue goal 3',
+      '    chassis.waitUntilDone();',
+      '    chassis.setPoseFromGoal(48, 24);',
       '    chassis.donut(90, 1000, {.forwards = false, .fastSpeed = 127, .slowSpeed = 30});',
       '}',
       '',
+    ].join('\n'));
+  });
+
+  it('only donuts at a goal, and can skip the goal reset', () => {
+    const p = path([
+      { x: 18, y: 72, theta: 0 },
+      { x: 30, y: 72, theta: 90, action: 'donut' },
+      { x: 24, y: 48, target: 'goal-blue-2', params: { goalReset: false } },
+      { x: 30, y: 30, target: 'goal-blue-2' },
+    ]);
+    const code = pathCode('p', p, opts);
+    expect(code).toContain('    chassis.moveToPoint(30, 72, 2000);\n    chassis.turnToHeading(90, 1000);');
+    expect(code).toContain('    chassis.moveToPoint(24, 48, 2000); // blue goal 2\n    chassis.moveToPoint(30, 30, 2000); // blue goal 2');
+    // driving forwards into a goal puts it in front of the robot
+    expect(code).toContain('    chassis.waitUntilDone();\n    chassis.setPoseFromGoal(24, 48, {.forwards = true});');
+    expect(code.match(/setPoseFromGoal/g)).toHaveLength(1);
+  });
+
+  it("leaves crimson::DonutParams' default speeds out", () => {
+    const p = path([{ x: 18, y: 72, theta: 0 }, { x: 24, y: 48, target: 'goal-blue-2', theta: 90, action: 'donut' }]);
+    expect(pathCode('p', p, opts)).toContain('    chassis.donut(90, 1000);');
+  });
+
+  it('puts the claw on a pin or loader', () => {
+    const p = path([{ x: 18, y: 48, theta: 0 }, { x: 48, y: 48, target: 'cup-yellow-2' }]);
+    expect(pathCode('p', p, opts)).toContain('    chassis.moveToPoint(41.7, 48, 2000); // claw on yellow pin (48, 48)');
+  });
+
+  it('slows down for the last part of a move', () => {
+    const p = path([{ x: 18, y: 72, theta: 0 }, { x: 68, y: 72, params: { slowdown: 0.2, slowSpeed: 40 } }]);
+    expect(pathCode('p', p, opts)).toContain([
+      '    chassis.moveToPoint(68, 72, 2000);',
+      '    chassis.waitUntil(40);',
+      '    chassis.cancelMotion();',
+      '    chassis.moveToPoint(68, 72, 2000, {.maxSpeed = 40}); // last 20%',
     ].join('\n'));
   });
 
@@ -82,7 +157,7 @@ describe('code', () => {
       'park': path([{ x: 24, y: 30, theta: 90 }, { x: 72, y: 20, theta: null }], { resetPose: true }),
     };
     const auton: AutonDefinition = { steps: [{ path: 'Score' }, { path: 'park' }, { path: 'park', rotate: true }, { path: 'gone' }] };
-    const code = autonCode('Skills', auton, paths);
+    const code = autonCode('Skills', auton, paths, opts);
     expect(code).toContain('void score() {');
     expect(code).toContain('// park\nvoid park() {\n    chassis.setPose(24, 30, 90);\n    chassis.moveToPoint(72, 20, 2000);\n}');
     expect(code).toContain('// park, turned 180 degrees\nvoid park_rot180() {\n    chassis.setPose(120, 114, -90);\n    chassis.moveToPoint(72, 124, 2000);\n}');
@@ -101,23 +176,52 @@ describe('code', () => {
 
   it('keeps C++ names unique', () => {
     const p = path([{ x: 0, y: 0 }, { x: 1, y: 1 }]);
-    const code = autonCode('A', { steps: [{ path: 'a b' }, { path: 'a_b' }, { path: 'a b', rotate: true }] }, { 'a b': p, a_b: p });
+    const code = autonCode('A', { steps: [{ path: 'a b' }, { path: 'a_b' }, { path: 'a b', rotate: true }] }, { 'a b': p, a_b: p }, opts);
     expect(code).toContain('void a_b() {');
     expect(code).toContain('void a_b_2() {');
     expect(code).toContain('    a_b();\n    a_b_2();\n    a_b_rot180();');
   });
 
   it('writes an empty run() for an empty auton', () => {
-    expect(autonCode('Empty', { steps: [] }, {})).toContain('void run() {}');
+    expect(autonCode('Empty', { steps: [] }, {}, opts)).toContain('void run() {}');
   });
 
   it('maps every flat line back to its point', () => {
-    const { code, sources } = flatProgram([{ def: score }], p => p);
+    const { code, sources } = flatProgram([{ def: score }], p => p, opts);
     const lines = code.split('\n');
     expect(lines[1]).toBe('    chassis.setPose(18, 72, 0);');
-    expect(sources.get(2)).toEqual({ step: 0, point: 0 });
-    expect(sources.get(5)).toEqual({ step: 0, point: 3 });
-    expect(sources.get(6)).toEqual({ step: 0, point: 3 });
+    expect(sources.get(2)).toEqual({ step: 0, point: 0, call: 'pose' });
+    expect(sources.get(5)).toEqual({ step: 0, point: 3, call: 'move' });
+    expect(sources.get(6)).toEqual({ step: 0, point: 3, call: 'turn' });
+    // the ghost doesn't reset at goals, so its trail stays drawn into the goal
+    expect(code).not.toContain('setPoseFromGoal');
+  });
+});
+
+describe('estimated timeouts', () => {
+  it('rounds a call time up into a timeout', () => {
+    expect(estimateFromSeconds(1)).toBe(1350);
+    expect(estimateFromSeconds(0.2)).toBe(350);
+  });
+
+  it('times every call in the ghost and uses that when no timeout is set', () => {
+    const p = path([
+      { x: 18, y: 72, theta: 0 },
+      { x: 60, y: 72, theta: 90, action: 'turn' },
+      { x: 60, y: 30, params: { slowdown: 0.3, timeout: 3000 } },
+    ]);
+    const est = estimatesFor(p, robot);
+    for (const key of ['1:move', '1:turn', '2:move', '2:slow']) {
+      expect(est.get(key)).toBeGreaterThan(100);
+      expect(est.get(key)! % 50).toBe(0);
+    }
+    // cached for the same path and robot
+    expect(estimatesFor(p, robot)).toBe(est);
+    const code = pathCode('p', p, { clawOffset: 6.3, estimates: def => estimatesFor(def, robot) });
+    expect(code).toContain(`    chassis.moveToPoint(60, 72, ${est.get('1:move')});`);
+    expect(code).toContain(`    chassis.turnToHeading(90, ${est.get('1:turn')});`);
+    // a timeout you typed wins
+    expect(code).toContain('    chassis.moveToPoint(60, 30, 3000);');
   });
 });
 
@@ -157,6 +261,35 @@ describe('ghost', () => {
   it('pins a timed-out move on its point', () => {
     const def = path([{ x: 18, y: 72, theta: 0 }, { x: 130, y: 72, params: { timeout: 300 } }]);
     const ghost = simulateSteps([{ def }], CRIMSON_PROFILE.robot, 15);
-    expect(ghost.timeouts).toEqual([{ step: 0, point: 1 }]);
+    expect(ghost.timeouts).toEqual([{ step: 0, point: 1, call: 'move' }]);
+  });
+
+  it("doesn't stall when a move ends a little beside its target", () => {
+    // the slow part arrives at an angle and stops 0.8 in off; LemLib's large-error exit ends it
+    const def = path([
+      { x: 18, y: 84, theta: -90 },
+      { x: 48, y: 48, target: 'cup-yellow-2' },
+      { x: 24, y: 48, target: 'goal-blue-2', theta: 180, action: 'donut', params: { reverse: true } },
+      { x: 2.4, y: 12.4, target: 'loader-blue-top', params: { slowdown: 0.3, slowSpeed: 40 } },
+    ]);
+    expect(simulateSteps([{ def }], CRIMSON_PROFILE.robot, 15).timeouts).toEqual([]);
+    expect(estimatesFor(def, robot).get('3:slow')).toBeLessThan(2000);
+  });
+
+  it('drives into a goal and through a slowdown', () => {
+    const def = path([
+      { x: 18, y: 72, theta: 0 },
+      { x: 60, y: 72, params: { slowdown: 0.5, slowSpeed: 30 } },
+      { x: 24, y: 48, target: 'goal-blue-2', params: { reverse: true } },
+    ]);
+    const ghost = simulateSteps([{ def }], CRIMSON_PROFILE.robot, 15);
+    expect(ghost.timeouts).toEqual([]);
+    const end = poseAt(ghost, ghost.duration)!;
+    expect(Math.hypot(end.x - 24, end.y - 48)).toBeLessThan(2);
+    // slower over the last half of the first move than before it
+    const fast = ghost.poses.filter(p => p.x > 30 && p.x < 36 && Math.abs(p.y - 72) < 2);
+    const slow = ghost.poses.filter(p => p.x > 48 && p.x < 54 && Math.abs(p.y - 72) < 2);
+    const avg = (ps: typeof ghost.poses) => ps.reduce((n, p) => n + p.speed, 0) / ps.length;
+    expect(avg(slow)).toBeLessThan(avg(fast));
   });
 });

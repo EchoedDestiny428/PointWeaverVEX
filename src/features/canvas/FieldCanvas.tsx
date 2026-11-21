@@ -8,8 +8,10 @@ import type { RobotConfig } from '../../robot/config';
 import { poseAt, type GhostPose } from '../../editor/ghost';
 import { speedColor, speedStops } from '../../utils/speedColor';
 import {
-  clampToField, insertPoint, offsetPoints, removePoint, resolveParams, round1, updatePoint, wrapDeg, type PointStart,
+  arrivals, clampToField, headingVector, insertPoint, offsetPoints, removePoint, resolveParams, round1, updatePoint,
+  updatePointParams, wrapDeg, type Arrival, type PointStart,
 } from '../../editor/pathOps';
+import { TARGETS, targetById, type Target } from '../../editor/targets';
 import { drawField } from './fieldArt';
 
 /** Another path of the auton, drawn under (or, in the auton view, as) the paths you see. */
@@ -65,6 +67,8 @@ const FIT_MARGIN = 30;
 const FIT_BOTTOM = 76; // room for the toolbar
 const HIT_TRAIL = 6;
 const SPEED_LEVELS = 48; // trail segments are batched by speed color, quantized to this many levels
+const SNAP_PX = 14; // a dragged point snaps to a goal, pin or loader this close
+const HIT_SLOW = 7;
 
 const makePalette = (day: boolean) => {
   const a = (o: number) => (day ? `rgba(0,0,0,${o})` : `rgba(255,255,255,${o})`);
@@ -85,6 +89,10 @@ const makePalette = (day: boolean) => {
     muted: a(0.6),
     start: a(0.3),
     startReset: a(0.75),
+    glow: day ? '217,154,0' : '255,207,77', // goals, pins and loaders you can snap to (r,g,b)
+    slow: day ? '#c77d00' : '#ffcf4d',
+    hit: day ? '#d93036' : '#e5484d',
+    hitFill: day ? 'rgba(217,48,54,0.18)' : 'rgba(229,72,77,0.22)',
   };
 };
 const PALETTES = { night: makePalette(false), day: makePalette(true) };
@@ -92,6 +100,8 @@ const PALETTES = { night: makePalette(false), day: makePalette(true) };
 type View = { scale: number; ox: number; oy: number };
 type Drag =
   | { kind: 'point'; index: number; mode: 'position' | 'heading'; moved: boolean }
+  // the slowdown marker on the segment into point `index`
+  | { kind: 'slow'; index: number; moved: boolean }
   // a selected group, dragged together; a click without dragging selects just the point that was clicked
   | { kind: 'group'; wx: number; wy: number; start: PointStart[]; clicked: number; moved: boolean }
   // Shift + drag on empty field: box select (screen px); a click without dragging clears the selection
@@ -125,6 +135,8 @@ export function FieldCanvas(props: Props) {
   const drag = useRef<Drag | null>(null);
   const cursor = useRef<{ sx: number; sy: number; wx: number; wy: number } | null>(null);
   const hoveredTrail = useRef<{ speed: number; t: number; sx: number; sy: number } | null>(null);
+  // the spot a dragged point is snapped to, glowing brighter
+  const snapHot = useRef<string | null>(null);
   const dirty = useRef(true);
   const latest = useRef(props);
   latest.current = props;
@@ -203,6 +215,44 @@ export function FieldCanvas(props: Props) {
     return null;
   };
 
+  /** Where the robot's centre goes for each point (claw spots stop short of the point). */
+  const arrivalsOf = (def: PathDefinition): Arrival[] => arrivals(def, latest.current.robot.clawOffset);
+
+  /** The goal, pin or loader closest to a screen spot, if it's close enough to snap to. */
+  const nearestTarget = (sx: number, sy: number): Target | null => {
+    let best: Target | null = null;
+    let bestD = SNAP_PX;
+    for (const t of TARGETS) {
+      const [tx, ty] = toScreen(t.x, t.y);
+      const d = Math.hypot(sx - tx, sy - ty);
+      if (d < bestD) {
+        bestD = d;
+        best = t;
+      }
+    }
+    return best;
+  };
+
+  /** Where a slowdown starts on the way into point i (screen), or null if it has none. */
+  const slowMarker = (def: PathDefinition, arr: Arrival[], i: number): [number, number] | null => {
+    const frac = resolveParams(def.params, def.points[i]?.params).slowdown;
+    if (!(frac > 0) || i < 1 || !arr[i]) return null;
+    const a = arr[i - 1];
+    const b = arr[i];
+    return toScreen(b.x + (a.x - b.x) * frac, b.y + (a.y - b.y) * frac);
+  };
+
+  const slowHit = (sx: number, sy: number): number | null => {
+    const path = latest.current.path;
+    if (!path) return null;
+    const arr = arrivalsOf(path);
+    for (let i = 1; i < path.points.length; i++) {
+      const m = slowMarker(path, arr, i);
+      if (m && Math.hypot(sx - m[0], sy - m[1]) < HIT_SLOW) return i;
+    }
+    return null;
+  };
+
   /** The auton step whose path runs under the cursor (not the one being edited). */
   const stepHit = (sx: number, sy: number): number | null => {
     const { steps, activeStep } = latest.current;
@@ -210,7 +260,7 @@ export function FieldCanvas(props: Props) {
     let bestD = HIT_LINE;
     for (const s of steps) {
       if (s.step === activeStep) continue;
-      const pts = s.def.points.map(p => toScreen(p.x, p.y));
+      const pts = arrivalsOf(s.def).map(p => toScreen(p.x, p.y));
       for (let i = 0; i < pts.length; i++) {
         const d = i === 0
           ? Math.hypot(sx - pts[0][0], sy - pts[0][1])
@@ -260,9 +310,11 @@ export function FieldCanvas(props: Props) {
     drawRulers(ctx, fx, fy, fs);
 
     hoveredTrail.current = null;
+    if (path) drawTargets(ctx);
     drawSteps(ctx, steps);
     if (path) drawPath(ctx, path, selection, hoverIndex);
     drawGhost(ctx, playback);
+    if (path) drawDragFootprint(ctx, path);
     if (latest.current.speedColors && playback.ghost.poses.length > 1) drawSpeedLegend(ctx);
     drawTooltips(ctx);
 
@@ -358,12 +410,13 @@ export function FieldCanvas(props: Props) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     if (autonView && steps[0]?.def.points.length) {
-      const p0 = steps[0].def.points[0];
-      drawRobot(ctx, p0.x, p0.y, p0.theta ?? 0, false, true);
+      const a0 = arrivalsOf(steps[0].def)[0];
+      drawRobot(ctx, a0.x, a0.y, a0.theta, false, true);
     }
     for (const s of steps) {
       if (s.step === activeStep) continue;
-      const pts = s.def.points;
+      // through where the robot's centre goes (claw spots stop short of their point)
+      const pts = arrivalsOf(s.def).map((a, i) => ({ ...a, theta: s.def.points[i].theta }));
       if (!pts.length) continue;
       const hot = s.step === hoverStep;
       ctx.strokeStyle = autonView ? (hot ? C.fg : C.muted) : hot ? C.contextHot : C.context;
@@ -544,34 +597,97 @@ export function FieldCanvas(props: Props) {
     ctx.stroke();
   };
 
+  /** The goals, pins and loaders a point can snap to: soft glows, brighter while a point is dragged near one. */
+  const drawTargets = (ctx: CanvasRenderingContext2D) => {
+    const dragging = drag.current?.kind === 'point' && drag.current.mode === 'position';
+    for (const t of TARGETS) {
+      const [sx, sy] = toScreen(t.x, t.y);
+      const hot = snapHot.current === t.id;
+      const r = (t.kind === 'goal' ? 13 : 9) * (hot ? 1.5 : 1);
+      const alpha = hot ? 0.75 : dragging ? 0.45 : 0.28;
+      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, r);
+      g.addColorStop(0, `rgba(${C.glow},${alpha})`);
+      g.addColorStop(0.45, `rgba(${C.glow},${alpha * 0.45})`);
+      g.addColorStop(1, `rgba(${C.glow},0)`);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(${C.glow},${hot ? 1 : 0.8})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, hot ? 2.5 : 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+
+  /** While a point is dragged: the robot where that point puts it, red where it would hit the wall. */
+  const drawDragFootprint = (ctx: CanvasRenderingContext2D, path: PathDefinition) => {
+    const d = drag.current;
+    if (d?.kind !== 'point' || !d.moved) return;
+    const p = path.points[d.index];
+    const a = arrivalsOf(path)[d.index];
+    if (!p || !a) return;
+    const theta = p.theta ?? a.theta;
+    const { robot } = latest.current;
+    const f = headingVector(theta);
+    const side = { x: -f.y, y: f.x };
+    const corners = [[1, 1], [1, -1], [-1, -1], [-1, 1]].map(([u, w]) => ({
+      x: a.x + (f.x * robot.length * u) / 2 + (side.x * robot.width * w) / 2,
+      y: a.y + (f.y * robot.length * u) / 2 + (side.y * robot.width * w) / 2,
+    }));
+    const hit = corners.some(c => c.x < 0 || c.x > FIELD_SIZE || c.y < 0 || c.y > FIELD_SIZE);
+    ctx.beginPath();
+    corners.forEach((c, k) => {
+      const [sx, sy] = toScreen(c.x, c.y);
+      if (k === 0) ctx.moveTo(sx, sy);
+      else ctx.lineTo(sx, sy);
+    });
+    ctx.closePath();
+    ctx.fillStyle = hit ? C.hitFill : C.ghostFill;
+    ctx.fill();
+    ctx.strokeStyle = hit ? C.hit : C.fg;
+    ctx.lineWidth = hit ? 2 : 1.25;
+    ctx.stroke();
+    const [cx, cy] = toScreen(a.x, a.y);
+    const L = (robot.length / 2) * view.current.scale;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos((theta * Math.PI) / 180) * L, cy + Math.sin((theta * Math.PI) / 180) * L);
+    ctx.stroke();
+  };
+
   const drawPath = (ctx: CanvasRenderingContext2D, path: PathDefinition, selection: number[], hoverIndex: number | null) => {
     const pts = path.points;
     const v = view.current;
     if (pts.length === 0) return;
     const { activeStep, timeouts } = latest.current;
+    const arr = arrivalsOf(path);
 
     // start footprint: solid where the pose is set (a path of its own, the auton's first step, or reset pose)
-    drawRobot(ctx, pts[0].x, pts[0].y, pts[0].theta ?? 0, false, activeStep == null || activeStep === 0 || !!path.resetPose);
+    drawRobot(ctx, arr[0].x, arr[0].y, arr[0].theta, false, activeStep == null || activeStep === 0 || !!path.resetPose);
 
+    // the line the robot's centre drives (claw spots stop short of their point)
     if (pts.length > 1) {
       ctx.strokeStyle = C.path;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      pts.forEach((p, i) => {
-        const [sx, sy] = toScreen(p.x, p.y);
+      arr.forEach((a, i) => {
+        const [sx, sy] = toScreen(a.x, a.y);
         if (i === 0) ctx.moveTo(sx, sy);
         else ctx.lineTo(sx, sy);
       });
       ctx.stroke();
     }
 
-    // early exit rings (the last point always has to arrive, so none there); "R" on moves driven backwards
+    // early exit rings (the last point always has to arrive, so none there); "R" on moves driven backwards;
+    // the slow last part of a move, with its handle
     ctx.font = '600 9px Inter, system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (let i = 1; i < pts.length; i++) {
       const r = resolveParams(path.params, pts[i].params);
-      const [sx, sy] = toScreen(pts[i].x, pts[i].y);
+      const [sx, sy] = toScreen(arr[i].x, arr[i].y);
+      const [ax, ay] = toScreen(arr[i - 1].x, arr[i - 1].y);
       if (i < pts.length - 1 && r.earlyExitRange > 0) {
         ctx.strokeStyle = selection.includes(i) ? C.ringSelected : C.ring;
         ctx.lineWidth = 1.5;
@@ -581,8 +697,27 @@ export function FieldCanvas(props: Props) {
         ctx.stroke();
         ctx.setLineDash([]);
       }
+      const m = slowMarker(path, arr, i);
+      if (m) {
+        ctx.strokeStyle = C.slow;
+        ctx.lineWidth = 3.5;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(m[0], m[1]);
+        ctx.lineTo(sx, sy);
+        ctx.stroke();
+        ctx.lineCap = 'butt';
+        ctx.save();
+        ctx.translate(m[0], m[1]);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillStyle = C.slow;
+        ctx.strokeStyle = C.bg;
+        ctx.lineWidth = 1.5;
+        ctx.fillRect(-4.5, -4.5, 9, 9);
+        ctx.strokeRect(-4.5, -4.5, 9, 9);
+        ctx.restore();
+      }
       if (r.reverse) {
-        const [ax, ay] = toScreen(pts[i - 1].x, pts[i - 1].y);
         const mx = (ax + sx) / 2;
         const my = (ay + sy) / 2;
         ctx.fillStyle = C.fg;
@@ -592,6 +727,25 @@ export function FieldCanvas(props: Props) {
         ctx.fillStyle = C.bg;
         ctx.fillText('R', mx, my + 0.5);
       }
+    }
+
+    // a point at a pin or loader: where the robot's centre stops, linked to the point (where the claw goes)
+    ctx.lineWidth = 1;
+    for (let i = 0; i < pts.length; i++) {
+      if (Math.hypot(arr[i].x - pts[i].x, arr[i].y - pts[i].y) < 0.05) continue;
+      const [px, py] = toScreen(pts[i].x, pts[i].y);
+      const [cx, cy] = toScreen(arr[i].x, arr[i].y);
+      ctx.strokeStyle = C.muted;
+      ctx.setLineDash([2, 2]);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(px, py);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = C.muted;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     // points (selected drawn last so they're on top)
@@ -628,6 +782,14 @@ export function FieldCanvas(props: Props) {
         ctx.fill();
         ctx.stroke();
         if (i > 0 && (p.action === 'turn' || p.action === 'donut')) drawTurnMark(ctx, sx, sy, p.action === 'donut', sel ? C.fg : C.muted);
+      }
+
+      if (p.target && targetById(p.target)) {
+        ctx.strokeStyle = `rgba(${C.glow},0.9)`;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 8.5, 0, Math.PI * 2);
+        ctx.stroke();
       }
 
       const radius = p.theta != null ? R_POINT : R_TRANS;
@@ -741,6 +903,14 @@ export function FieldCanvas(props: Props) {
       return;
     }
 
+    const slow = path ? slowHit(sx, sy) : null;
+    if (path && slow != null) {
+      onSelect(slow);
+      drag.current = { kind: 'slow', index: slow, moved: false };
+      setCursor('grabbing');
+      return;
+    }
+
     // empty field: Shift + drag box-selects, a plain drag pans, a click on another path of the auton opens it
     drag.current = e.shiftKey && path
       ? { kind: 'box', x0: sx, y0: sy, x1: sx, y1: sy, moved: false }
@@ -765,7 +935,9 @@ export function FieldCanvas(props: Props) {
         at = i + 1;
       }
     }
-    update(insertPoint(path, at, { ...clampToField(w.x, w.y), theta: pts.length === 0 ? 0 : null }));
+    const spot = e.ctrlKey || e.metaKey ? null : nearestTarget(sx, sy);
+    const where = spot ? { x: spot.x, y: spot.y, target: spot.id } : clampToField(w.x, w.y);
+    update(insertPoint(path, at, { ...where, theta: pts.length === 0 ? 0 : null }));
     onSelect(at);
   };
 
@@ -781,9 +953,29 @@ export function FieldCanvas(props: Props) {
       const hit = path ? hitTest(sx, sy) : null;
       const idx = hit?.index ?? null;
       if (idx !== hoverIndex) onHover(idx);
-      const step = hit ? null : stepHit(sx, sy);
+      const slow = hit ? null : slowHit(sx, sy);
+      const step = hit || slow != null ? null : stepHit(sx, sy);
       if (step !== hoverStep) onHoverStep(step);
-      setCursor(hit ? 'grab' : step != null ? 'pointer' : 'default');
+      setCursor(hit || slow != null ? 'grab' : step != null ? 'pointer' : 'default');
+      return;
+    }
+
+    if (d.kind === 'slow' && path) {
+      // slide the handle along the move: the slow part is from the handle to the point
+      const arr = arrivalsOf(path);
+      const a = arr[d.index - 1];
+      const b = arr[d.index];
+      if (!a || !b) return;
+      const [ax, ay] = toScreen(a.x, a.y);
+      const [bx, by] = toScreen(b.x, b.y);
+      const len2 = (bx - ax) ** 2 + (by - ay) ** 2 || 1;
+      const t = ((sx - ax) * (bx - ax) + (sy - ay) * (by - ay)) / len2;
+      const frac = Math.max(0.05, Math.min(0.95, Math.round((1 - t) * 20) / 20));
+      if (!d.moved) {
+        checkpoint();
+        d.moved = true;
+      }
+      update(updatePointParams(path, d.index, { slowdown: frac }), false);
       return;
     }
 
@@ -828,9 +1020,15 @@ export function FieldCanvas(props: Props) {
         d.moved = true;
       }
       if (d.mode === 'position') {
-        // Alt snaps to the 6 in grid
-        const snap = e.altKey ? (v: number) => Math.round(v / 6) * 6 : round1;
-        update(updatePoint(path, d.index, clampToField(w.x, w.y, snap)), false);
+        // near a goal, pin or loader it snaps there (hold Ctrl to place it freely); Alt snaps to the 6 in grid
+        const spot = e.ctrlKey || e.metaKey ? null : nearestTarget(sx, sy);
+        snapHot.current = spot?.id ?? null;
+        if (spot) {
+          update(updatePoint(path, d.index, { x: spot.x, y: spot.y, target: spot.id }), false);
+        } else {
+          const grid = e.altKey ? (v: number) => Math.round(v / 6) * 6 : round1;
+          update(updatePoint(path, d.index, { ...clampToField(w.x, w.y, grid), target: null }), false);
+        }
       } else {
         // clockwise from +X
         let deg = (Math.atan2(-(w.y - p.y), w.x - p.x) * 180) / Math.PI;
@@ -843,6 +1041,8 @@ export function FieldCanvas(props: Props) {
   const onPointerUp = (e: React.PointerEvent) => {
     const d = drag.current;
     drag.current = null;
+    snapHot.current = null;
+    dirty.current = true;
     canvasRef.current?.releasePointerCapture(e.pointerId);
     if (!d) return;
     const { path, onSelect, onSelectMany, onPickStep } = latest.current;

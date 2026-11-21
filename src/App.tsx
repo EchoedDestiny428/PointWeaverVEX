@@ -15,7 +15,7 @@ import { CodeView } from './features/inspector/CodeView';
 import { Icon } from './components/Icon';
 import { appendPoint, movePoint, removePoints, rotate180, stepView } from './editor/pathOps';
 import { autonCode, pathCode, type SimStep } from './editor/codegen';
-import { simulateSteps } from './editor/ghost';
+import { estimatesFor, simulateSteps } from './editor/ghost';
 import type { PathDefinition } from './editor/types';
 
 const GRID = 'pw:grid';
@@ -92,11 +92,15 @@ export default function App() {
     setHoverStep(null);
   }, [focusKey]);
 
+  const robot = lib.robot;
   const code = useMemo(() => {
-    if (currentAutonName && currentAuton) return autonCode(currentAutonName, currentAuton, paths);
-    if (currentPathName && paths[currentPathName]) return pathCode(currentPathName, paths[currentPathName]);
+    const opts = { clawOffset: robot.clawOffset, estimates: (def: PathDefinition) => estimatesFor(def, robot) };
+    if (currentAutonName && currentAuton) return autonCode(currentAutonName, currentAuton, paths, opts);
+    if (currentPathName && paths[currentPathName]) return pathCode(currentPathName, paths[currentPathName], opts);
     return '';
-  }, [currentAutonName, currentAuton, currentPathName, paths]);
+  }, [currentAutonName, currentAuton, currentPathName, paths, robot]);
+  // the ghost's suggested timeouts for the open path (the same for a turned use)
+  const estimates = useMemo(() => estimatesFor(editing ? path : EMPTY, robot), [editing, path, robot]);
 
   const addPoint = () => {
     if (!editing) return;
@@ -304,6 +308,7 @@ export default function App() {
               update={update}
               onSelect={setSelectedIndex}
               duration={ghost.duration}
+              estimates={estimates}
               auton={focus?.kind === 'step' && currentAutonName
                 ? { name: currentAutonName, rotated, first: focus.step === 0, onRotate: setStepRotate }
                 : null}

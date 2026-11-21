@@ -11,6 +11,7 @@ export const CRIMSON_PROFILE: TeamProfile = {
     acceleration: 140,
     maxTurnRate: 360,
     turnAcceleration: 1800,
+    clawOffset: 6.3, // 16 cm
   },
   chassisNames: ["chassis"],
   mechanismTimes: {

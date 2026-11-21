@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PathDefinition } from '../../editor/types';
-import { resolveParams } from '../../editor/pathOps';
+import { actionOf, resolveParams } from '../../editor/pathOps';
+import { targetById } from '../../editor/targets';
 import { HeadingGlyph, IconButton } from '../../components/Icon';
 
 interface Props {
@@ -19,8 +20,7 @@ interface Props {
 /** What a point makes in code, for the row's tag. */
 const callOf = (p: PathDefinition['points'][number], i: number) => {
   if (i === 0) return 'start';
-  if (p.theta == null) return 'point';
-  return p.action === 'turn' ? 'turn' : p.action === 'donut' ? 'donut' : 'pose';
+  return actionOf(p) ?? 'point';
 };
 
 /**
@@ -51,7 +51,9 @@ export function PointList({ path, selectedIndex, selection, hoverIndex, onSelect
       <div className="list scroll points" ref={listRef} onMouseLeave={() => onHover(null)}>
         {path.points.map((p, i) => {
           const call = callOf(p, i);
-          const reverse = i > 0 && resolveParams(path.params, p.params).reverse;
+          const r = resolveParams(path.params, p.params);
+          const reverse = i > 0 && r.reverse;
+          const spot = targetById(p.target);
           return (
             <div
               key={i}
@@ -81,7 +83,7 @@ export function PointList({ path, selectedIndex, selection, hoverIndex, onSelect
               }}
               onDragEnd={endDrag}
             >
-              <span className="idx">{i}</span>
+              <span className={`idx ${spot ? 'snapped-idx' : ''}`} title={spot?.label}>{i}</span>
               <span className="num">{p.x.toFixed(1)}</span>
               <span className="num">{p.y.toFixed(1)}</span>
               <span className="heading" title={p.theta != null ? `${p.theta}°` : 'No heading'}>
@@ -90,7 +92,11 @@ export function PointList({ path, selectedIndex, selection, hoverIndex, onSelect
               <span className="flags">
                 {timeouts.includes(i)
                   ? <span className="warn-dot" title="This move times out in the ghost" />
-                  : <span className={`call ${call}`} title={reverse ? 'Driven backwards' : undefined}>{reverse ? `${call} R` : call}</span>}
+                  : <span className={`call ${call}`}
+                    title={[spot && (spot.kind === 'goal' ? `At ${spot.label}` : `Claw on ${spot.label}`), reverse && 'Driven backwards',
+                      r.slowdown > 0 && `Slows down for the last ${Math.round(r.slowdown * 100)}%`].filter(Boolean).join('. ') || undefined}>
+                    {call}{reverse ? ' R' : ''}{r.slowdown > 0 ? ' ▾' : ''}
+                  </span>}
               </span>
             </div>
           );

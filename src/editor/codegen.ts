@@ -1,12 +1,19 @@
-import type { AutonDefinition, PathDefinition, PathPoint } from './types';
-import { resolveParams, stepView, wrapDeg, type ResolvedParams } from './pathOps';
+import type { AutonDefinition, PathDefinition } from './types';
+import { DEFAULTS } from './types';
+import { actionOf, arrivals, resolveParams, stepView, wrapDeg, type ResolvedParams } from './pathOps';
+import { targetById, where } from './targets';
 
 /**
  * LemLib code for autons and paths (PROS 4 + LemLib 0.5).
  *
  * A point with a heading becomes chassis.moveToPose, one without becomes chassis.moveToPoint. A point that turns
- * (or donuts) at its heading moves with moveToPoint, then turns in place with its own timeout. Point 0 is where the
- * path starts, so it never makes a move; it sets the pose when the path (or the auton) starts there.
+ * (or, at a goal, donuts) at its heading moves with moveToPoint, then turns in place with its own timeout. Point 0
+ * is where the path starts, so it never makes a move; it sets the pose when the path (or the auton) starts there.
+ *
+ * A point at a goal sends the robot's centre to the goal's centre (it clips into the goal), then waits and resets
+ * the pose from the goal. A point at a pin or loader stops where the claw is on it (see arrivals in pathOps).
+ * A slowdown drives the first part of the move, then cancels it and drives the rest at a lower max speed.
+ * Timeouts nobody set come from the ghost (estimates); without any, LemLib-ish defaults.
  */
 
 export interface Pose {
@@ -19,6 +26,20 @@ export interface Pose {
 export type FrameMap = (p: Pose) => Pose;
 
 const identity: FrameMap = p => p;
+
+/** What a generated line does, so the ghost's timings can be matched back to it. */
+export type CallKind = 'pose' | 'move' | 'slow' | 'turn' | 'reset';
+
+/** Ghost-measured timeouts (ms) for one path's calls, by estimateKey. */
+export type Estimates = ReadonlyMap<string, number>;
+export const estimateKey = (point: number, call: 'move' | 'slow' | 'turn') => `${point}:${call}`;
+
+export interface CodeOptions {
+  /** robot centre to claw centre (in) */
+  clawOffset: number;
+  /** the estimated timeouts for a path (as stored, before any turn) */
+  estimates?: (def: PathDefinition) => Estimates | undefined;
+}
 
 /** A number the way it reads best in C++: at most two decimals, no trailing zeros, no -0. */
 export function num(v: number): string {
@@ -48,6 +69,7 @@ export function cppName(name: string): string {
 export interface LineSource {
   step: number;
   point: number;
+  call: CallKind;
 }
 
 interface Line {
@@ -63,48 +85,90 @@ const params = (entries: [string, string | null][]) => {
 const direction = (d: ResolvedParams['turnDirection']) =>
   d === 'cw' ? 'lemlib::AngularDirection::CW_CLOCKWISE' : d === 'ccw' ? 'lemlib::AngularDirection::CCW_COUNTERCLOCKWISE' : null;
 
-/** The calls for driving to one point (and turning there). */
-function pointCalls(p: PathPoint, r: ResolvedParams, map: FrameMap): string[] {
-  const at = map({ x: p.x, y: p.y, theta: p.theta ?? 0 });
-  const heading = p.theta != null;
-  const action = p.action ?? 'pose';
-  const move = params([
-    ['forwards', r.reverse ? 'false' : null],
-    ['maxSpeed', r.maxSpeed !== 127 ? num(r.maxSpeed) : null],
-    ['minSpeed', r.minSpeed !== 0 ? num(r.minSpeed) : null],
-    ['earlyExitRange', r.earlyExitRange !== 0 ? num(r.earlyExitRange) : null],
-  ]);
-  const theta = num(wrapDeg(at.theta));
-  if (heading && action === 'pose') {
-    return [`chassis.moveToPose(${num(at.x)}, ${num(at.y)}, ${theta}, ${num(r.timeout)}${move});`];
-  }
-  const out = [`chassis.moveToPoint(${num(at.x)}, ${num(at.y)}, ${num(r.timeout)}${move});`];
-  if (heading && action === 'turn') {
-    out.push(`chassis.turnToHeading(${theta}, ${num(r.turnTimeout)}${params([['direction', direction(r.turnDirection)]])});`);
-  } else if (heading && action === 'donut') {
-    out.push(`chassis.donut(${theta}, ${num(r.turnTimeout)}${params([
-      ['direction', direction(r.turnDirection)],
-      ['forwards', r.donutBehind ? 'false' : null],
-      ['fastSpeed', num(r.donutFast)],
-      ['slowSpeed', num(r.donutSlow)],
-    ])});`);
-  }
-  return out;
+/**
+ * code: the output. ghost: for the simulator (no goal resets, so the ghost stays drawn into the goal).
+ * measure: the simulator with long timeouts, to time every call for the estimates.
+ */
+type Mode = 'code' | 'ghost' | 'measure';
+
+const MEASURE_TIMEOUT = 8000;
+
+interface PathOpts {
+  setPose: boolean;
+  map: FrameMap;
+  clawOffset: number;
+  estimates?: Estimates;
+  mode: Mode;
 }
 
-const setPose = (p: PathPoint, map: FrameMap) => {
-  const at = map({ x: p.x, y: p.y, theta: p.theta ?? 0 });
-  return `chassis.setPose(${num(at.x)}, ${num(at.y)}, ${num(wrapDeg(at.theta))});`;
-};
-
-/** The body of one path: setPose (when asked) and a move for every point after point 0. */
-function pathLines(def: PathDefinition, step: number, opts: { setPose: boolean; map: FrameMap }): Line[] {
+/** The body of one path: setPose (when asked) and the calls for every point after point 0. */
+function pathLines(def: PathDefinition, step: number, opts: PathOpts): Line[] {
   const lines: Line[] = [];
   const pts = def.points;
-  if (pts.length && opts.setPose) lines.push({ text: setPose(pts[0], opts.map), source: { step, point: 0 } });
+  const arr = arrivals(def, opts.clawOffset);
+  const { map, mode } = opts;
+  const push = (text: string, point: number, call: CallKind) => lines.push({ text, source: { step, point, call } });
+
+  if (pts.length && opts.setPose) {
+    const at = map(arr[0]);
+    push(`chassis.setPose(${num(at.x)}, ${num(at.y)}, ${num(wrapDeg(at.theta))});`, 0, 'pose');
+  }
+
   for (let i = 1; i < pts.length; i++) {
-    const r = resolveParams(def.params, pts[i].params);
-    for (const text of pointCalls(pts[i], r, opts.map)) lines.push({ text, source: { step, point: i } });
+    const p = pts[i];
+    const a = arr[i];
+    const r = resolveParams(def.params, p.params);
+    const t = targetById(p.target);
+    const action = actionOf(p);
+    const timeout = (call: 'move' | 'slow' | 'turn') => {
+      if (mode === 'measure') return MEASURE_TIMEOUT;
+      const set = call === 'turn' ? r.turnTimeout : r.timeout;
+      return set ?? opts.estimates?.get(`${i}:${call}`) ?? (call === 'turn' ? DEFAULTS.turnTimeout : DEFAULTS.timeout);
+    };
+    const comment = !t ? '' : t.kind === 'goal' ? ` // ${t.label}` : ` // claw on ${t.label} ${where(t)}`;
+    const to = map({ x: a.x, y: a.y, theta: p.theta ?? 0 });
+    const theta = num(wrapDeg(to.theta));
+    const move = (maxSpeed: number, ms: number) => {
+      const rest = params([
+        ['forwards', r.reverse ? 'false' : null],
+        ['maxSpeed', maxSpeed !== 127 ? num(maxSpeed) : null],
+        ['minSpeed', r.minSpeed !== 0 ? num(r.minSpeed) : null],
+        ['earlyExitRange', r.earlyExitRange !== 0 ? num(r.earlyExitRange) : null],
+      ]);
+      return action === 'pose'
+        ? `chassis.moveToPose(${num(to.x)}, ${num(to.y)}, ${theta}, ${num(ms)}${rest});`
+        : `chassis.moveToPoint(${num(to.x)}, ${num(to.y)}, ${num(ms)}${rest});`;
+    };
+
+    if (r.slowdown > 0) {
+      // full speed until the last part, then the same move again, slower
+      const from = arr[i - 1];
+      const cut = (1 - r.slowdown) * Math.hypot(a.x - from.x, a.y - from.y);
+      push(`${move(r.maxSpeed, timeout('move'))}${comment}`, i, 'move');
+      push(`chassis.waitUntil(${num(cut)});`, i, 'move');
+      push('chassis.cancelMotion();', i, 'move');
+      push(`${move(Math.min(r.maxSpeed, r.slowSpeed), timeout('slow'))} // last ${Math.round(r.slowdown * 100)}%`, i, 'slow');
+    } else {
+      push(`${move(r.maxSpeed, timeout('move'))}${comment}`, i, 'move');
+    }
+
+    if (t?.kind === 'goal' && r.goalReset && mode === 'code') {
+      const g = map({ x: t.x, y: t.y, theta: 0 });
+      push('chassis.waitUntilDone();', i, 'reset');
+      push(`chassis.setPoseFromGoal(${num(g.x)}, ${num(g.y)}${params([['forwards', r.reverse ? null : 'true']])});`, i, 'reset');
+    }
+
+    if (action === 'turn') {
+      push(`chassis.turnToHeading(${theta}, ${num(timeout('turn'))}${params([['direction', direction(r.turnDirection)]])});`, i, 'turn');
+    } else if (action === 'donut') {
+      push(`chassis.donut(${theta}, ${num(timeout('turn'))}${params([
+        ['direction', direction(r.turnDirection)],
+        ['forwards', r.donutBehind ? 'false' : null],
+        // crimson::DonutParams defaults (prelude-to-chaos: include/motion/chassis.hpp)
+        ['fastSpeed', r.donutFast !== DEFAULTS.donutFast ? num(r.donutFast) : null],
+        ['slowSpeed', r.donutSlow !== DEFAULTS.donutSlow ? num(r.donutSlow) : null],
+      ])});`, i, 'turn');
+    }
   }
   return lines;
 }
@@ -118,8 +182,10 @@ const fn = (name: string, body: string[], comment?: string) => [
 const FRAME_NOTE = '// Field frame: (0, 0) is the corner on blue\'s right, +X toward red, heading 0 faces red, clockwise. Inches.';
 
 /** One path on its own, as a function. */
-export function pathCode(name: string, def: PathDefinition): string {
-  const body = pathLines(def, 0, { setPose: !!def.resetPose, map: identity }).map(l => l.text);
+export function pathCode(name: string, def: PathDefinition, opts: CodeOptions): string {
+  const body = pathLines(def, 0, {
+    setPose: !!def.resetPose, map: identity, clawOffset: opts.clawOffset, estimates: opts.estimates?.(def), mode: 'code',
+  }).map(l => l.text);
   return [`// ${name}, made in PointWeaver.`, FRAME_NOTE, '', ...fn(cppName(name), body)].join('\n') + '\n';
 }
 
@@ -127,7 +193,7 @@ export function pathCode(name: string, def: PathDefinition): string {
  * A whole auton: a function for every path it uses (one more, ending in _rot180, for a path it also uses turned
  * around), then run(), which sets the start pose and calls them in order.
  */
-export function autonCode(name: string, auton: AutonDefinition, paths: Record<string, PathDefinition>): string {
+export function autonCode(name: string, auton: AutonDefinition, paths: Record<string, PathDefinition>, opts: CodeOptions): string {
   // one C++ name per path name, kept unique even when two names would read the same
   const names = new Map<string, string>();
   const used = new Set<string>();
@@ -155,16 +221,20 @@ export function autonCode(name: string, auton: AutonDefinition, paths: Record<st
     calls.push(`${id}();`);
     if (written.has(id)) return;
     written.add(id);
-    const view = stepView(def, step);
     // the auton's start pose is set in run(), so the first step's own setPose (if any) stays in its function
-    const body = pathLines(view, k, { setPose: !!def.resetPose, map: identity }).map(l => l.text);
+    const body = pathLines(stepView(def, step), k, {
+      setPose: !!def.resetPose, map: identity, clawOffset: opts.clawOffset, estimates: opts.estimates?.(def), mode: 'code',
+    }).map(l => l.text);
     out.push('', ...fn(id, body, step.rotate ? `${step.path}, turned 180 degrees` : step.path));
   });
 
   const first = auton.steps[0];
   const firstDef = first && paths[first.path];
   const run: string[] = [];
-  if (firstDef?.points.length && !firstDef.resetPose) run.push(setPose(stepView(firstDef, first).points[0], identity));
+  if (firstDef?.points.length && !firstDef.resetPose) {
+    const a = arrivals(stepView(firstDef, first), opts.clawOffset)[0];
+    run.push(`chassis.setPose(${num(a.x)}, ${num(a.y)}, ${num(wrapDeg(a.theta))});`);
+  }
   run.push(...calls);
   out.push('', ...fn('run', run));
   return out.join('\n') + '\n';
@@ -180,10 +250,20 @@ export interface SimStep {
  * The steps as one flat run() for the simulator, in its frame, with the source of every line (1-based numbers).
  * The first step always sets the pose.
  */
-export function flatProgram(steps: SimStep[], map: FrameMap): { code: string; sources: Map<number, LineSource> } {
+export function flatProgram(
+  steps: SimStep[],
+  map: FrameMap,
+  opts: CodeOptions & { measure?: boolean },
+): { code: string; sources: Map<number, LineSource> } {
   const lines: Line[] = [];
   steps.forEach((s, k) => {
-    lines.push(...pathLines(stepView(s.def, s), k, { setPose: k === 0 || !!s.def.resetPose, map }));
+    lines.push(...pathLines(stepView(s.def, s), k, {
+      setPose: k === 0 || !!s.def.resetPose,
+      map,
+      clawOffset: opts.clawOffset,
+      estimates: opts.estimates?.(s.def),
+      mode: opts.measure ? 'measure' : 'ghost',
+    }));
   });
   const sources = new Map<number, LineSource>();
   const code = ['void run() {'];

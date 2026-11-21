@@ -4,6 +4,8 @@ import type { HistoryMode } from '../../hooks/useLibrary';
 import { IconButton } from '../../components/Icon';
 import { NumberField, Segmented, Toggle } from '../../components/Controls';
 import { removePoint, resolveParams, updatePathParams, updatePoint, updatePointParams, wrapDeg } from '../../editor/pathOps';
+import { estimateKey, type Estimates } from '../../editor/codegen';
+import { targetById } from '../../editor/targets';
 
 interface Props {
   path: PathDefinition;
@@ -17,6 +19,8 @@ interface Props {
   duration: number;
   /** editing a step of an auton: its name, and whether the step is turned around */
   auton: { name: string; rotated: boolean; first: boolean; onRotate: (v: boolean) => void } | null;
+  /** the ghost's suggested timeouts for this path */
+  estimates: Estimates;
 }
 
 const show = (v: number | null | undefined, fallback: number | string) => (v != null ? String(v) : String(fallback));
@@ -35,7 +39,9 @@ const DIRECTIONS: { value: TurnDirection; label: string; title: string }[] = [
   { value: 'ccw', label: 'CCW', title: 'Counterclockwise' },
 ];
 
-export function Inspector({ path, name, selectedIndex, selectionCount, onDeleteSelection, update, onSelect, duration, auton }: Props) {
+export function Inspector({
+  path, name, selectedIndex, selectionCount, onDeleteSelection, update, onSelect, duration, auton, estimates,
+}: Props) {
   const point = selectedIndex != null ? path.points[selectedIndex] : null;
   const pp = path.params ?? {};
 
@@ -78,10 +84,12 @@ export function Inspector({ path, name, selectedIndex, selectionCount, onDeleteS
         <div className="section-head sub"><span>Defaults</span></div>
         <div className="pad stack">
           <div className="grid-2">
-            <NumberField label="Timeout" suffix="ms" step={100} nullable value={pp.timeout} placeholder={String(DEFAULTS.timeout)}
-              title="Each move's timeout" onChange={v => setPath({ timeout: positive(v) }, 'path-timeout')} />
-            <NumberField label="Turn timeout" suffix="ms" step={100} nullable value={pp.turnTimeout} placeholder={String(DEFAULTS.turnTimeout)}
-              title="Each turn's or donut's timeout" onChange={v => setPath({ turnTimeout: positive(v) }, 'path-turn')} />
+            <NumberField label="Timeout" suffix="ms" step={100} nullable value={pp.timeout} placeholder="auto"
+              title="Every move's timeout. Empty: each move's own estimate from the ghost (its time plus a quarter, plus 100 ms)."
+              onChange={v => setPath({ timeout: positive(v) }, 'path-timeout')} />
+            <NumberField label="Turn timeout" suffix="ms" step={100} nullable value={pp.turnTimeout} placeholder="auto"
+              title="Every turn's and donut's timeout. Empty: each one's estimate from the ghost."
+              onChange={v => setPath({ turnTimeout: positive(v) }, 'path-turn')} />
             <NumberField label="Max" suffix="/127" step={5} nullable value={pp.maxSpeed} placeholder="127"
               onChange={v => setPath({ maxSpeed: speed(v) }, 'path-max')} />
             <NumberField label="Min" suffix="/127" step={5} nullable value={pp.minSpeed} placeholder="0"
@@ -107,11 +115,26 @@ export function Inspector({ path, name, selectedIndex, selectionCount, onDeleteS
       onSelect(null);
     }} />
   );
+  const spot = targetById(point.target);
+  // typing a position takes the point off its goal, pin or loader
   const position = (
-    <div className="grid-2">
-      <NumberField label="X" suffix="in" value={point.x} onChange={v => v != null && set({ x: Math.max(0, Math.min(144, v)) }, 'x')} />
-      <NumberField label="Y" suffix="in" value={point.y} onChange={v => v != null && set({ y: Math.max(0, Math.min(144, v)) }, 'y')} />
-    </div>
+    <>
+      {spot && (
+        <div className="snapped" title={spot.kind === 'goal'
+          ? "The robot's centre drives to the goal's centre (it clips into the goal)"
+          : "The robot stops with its claw's centre on this spot (Claw offset under Robot)"}>
+          <span className="glow-dot" />
+          <span className="grow ellipsis">{spot.kind === 'goal' ? `At ${spot.label}` : `Claw on ${spot.label}`}</span>
+          <IconButton icon="x" title="Unsnap (keep the position)" onClick={() => update(updatePoint(path, i, { target: null }))} />
+        </div>
+      )}
+      <div className="grid-2">
+        <NumberField label="X" suffix="in" value={point.x}
+          onChange={v => v != null && set({ x: Math.max(0, Math.min(144, v)), target: null }, 'x')} />
+        <NumberField label="Y" suffix="in" value={point.y}
+          onChange={v => v != null && set({ y: Math.max(0, Math.min(144, v)), target: null }, 'y')} />
+      </div>
+    </>
   );
 
   if (i === 0) {
@@ -142,8 +165,17 @@ export function Inspector({ path, name, selectedIndex, selectionCount, onDeleteS
   const ov = point.params ?? {};
   const isLast = i === path.points.length - 1;
   const heading = point.theta != null;
-  const action = point.action ?? 'pose';
+  const atGoal = spot?.kind === 'goal';
+  // a donut orbits the goal the robot is on, so it's only offered there
+  const action = point.action === 'donut' && !atGoal ? 'turn' : point.action ?? 'pose';
   const turns = heading && action !== 'pose';
+  const est = (call: 'move' | 'slow' | 'turn') => estimates.get(estimateKey(i, call));
+  const auto = (given: number | null | undefined, call: 'move' | 'slow' | 'turn', fallback: number) =>
+    show(given, est(call) ?? fallback);
+  const estHint = (call: 'move' | 'slow' | 'turn') => {
+    const e = est(call);
+    return e != null ? `Empty: ${e} ms, the ghost's time plus a quarter, plus 100 ms` : 'Empty: no estimate (the ghost never finishes it)';
+  };
 
   return (
     <div className="inspector scroll">
@@ -161,9 +193,10 @@ export function Inspector({ path, name, selectedIndex, selectionCount, onDeleteS
             title="0 faces red, clockwise" onChange={v => v != null && set({ theta: wrapDeg(v) }, 'theta')} />
         </div>
         {heading && (
-          <Segmented label="At the heading" value={action} options={ACTIONS}
+          <Segmented label="At the heading" value={action} options={atGoal ? ACTIONS : ACTIONS.filter(a => a.value !== 'donut')}
             onChange={v => update(updatePoint(path, i, { action: v === 'pose' ? null : v }))} />
         )}
+        {heading && !atGoal && <span className="hint">Snap the point to a goal to donut there.</span>}
       </div>
 
       <div className="section-head sub">
@@ -171,7 +204,8 @@ export function Inspector({ path, name, selectedIndex, selectionCount, onDeleteS
       </div>
       <div className="pad stack">
         <div className="grid-2">
-          <NumberField label="Timeout" suffix="ms" step={100} nullable value={ov.timeout} placeholder={show(pp.timeout, DEFAULTS.timeout)}
+          <NumberField label="Timeout" suffix="ms" step={100} nullable value={ov.timeout}
+            placeholder={auto(pp.timeout, 'move', DEFAULTS.timeout)} title={estHint('move')}
             onChange={v => setParam({ timeout: positive(v) }, 'timeout')} />
           <NumberField label="Exit" suffix="in" nullable value={ov.earlyExitRange} disabled={isLast}
             placeholder={isLast ? 'off' : show(pp.earlyExitRange, 'off')} title={isLast ? 'Last point always arrives' : 'Early exit range'}
@@ -185,6 +219,34 @@ export function Inspector({ path, name, selectedIndex, selectionCount, onDeleteS
           <span className="field-label">Reverse</span>
           <Toggle checked={r.reverse} title="Drive backwards" onChange={v => setParam({ reverse: v ? true : null }, 'reverse')} />
         </div>
+        <div className="field" title="For the last part of the move, a lower max speed: the code waits until that far in, cancels the move and drives the rest slower. Drag the diamond on the field too.">
+          <span className="field-label">Slow down for the last</span>
+          <div className="event-slider">
+            <input type="range" min={0} max={0.95} step={0.05} value={r.slowdown} aria-label="Slow down for the last part of the move"
+              onChange={el => {
+                const v = Number(el.target.value);
+                setParam({ slowdown: v > 0 ? v : null }, 'slowdown');
+              }} />
+            <span className="num">{Math.round(r.slowdown * 100)}%</span>
+          </div>
+        </div>
+        {r.slowdown > 0 && (
+          <div className="grid-2">
+            <NumberField label="Slow max" suffix="/127" step={5} nullable value={ov.slowSpeed} placeholder={String(DEFAULTS.slowSpeed)}
+              title="Max speed for the slow part" onChange={v => setParam({ slowSpeed: speed(v) }, 'slow-speed')} />
+            <div className="readout est" title={estHint('slow')}>
+              <span className="field-label">Slow part</span>
+              <span className="num">{est('slow') != null ? `≈ ${est('slow')} ms` : '—'}</span>
+            </div>
+          </div>
+        )}
+        {atGoal && (
+          <div className="row-between" title="chassis.waitUntilDone, then chassis.setPoseFromGoal: the robot is pushed against the goal, so its pose is set from the goal's">
+            <span className="field-label">Reset pose from goal</span>
+            <Toggle checked={r.goalReset} title="setPoseFromGoal after arriving"
+              onChange={v => setParam({ goalReset: v ? null : false }, 'goal-reset')} />
+          </div>
+        )}
       </div>
 
       {turns && (
@@ -194,8 +256,10 @@ export function Inspector({ path, name, selectedIndex, selectionCount, onDeleteS
           </div>
           <div className="pad stack">
             <div className="grid-2">
-              <NumberField label="Timeout" suffix="ms" step={100} nullable value={ov.turnTimeout} placeholder={show(pp.turnTimeout, DEFAULTS.turnTimeout)}
-                title="Its own timeout, separate from the move's" onChange={v => setParam({ turnTimeout: positive(v) }, 'turn-timeout')} />
+              <NumberField label="Timeout" suffix="ms" step={100} nullable value={ov.turnTimeout}
+                placeholder={auto(pp.turnTimeout, 'turn', DEFAULTS.turnTimeout)}
+                title={`Its own timeout, separate from the move's. ${estHint('turn')}`}
+                onChange={v => setParam({ turnTimeout: positive(v) }, 'turn-timeout')} />
               <Segmented label="Direction" value={r.turnDirection} options={DIRECTIONS}
                 onChange={v => setParam({ turnDirection: v === 'auto' ? null : v }, 'turn-dir')} />
               {action === 'donut' && (
