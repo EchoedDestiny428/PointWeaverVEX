@@ -943,9 +943,12 @@ export function FieldCanvas(props: Props) {
 
   useEffect(() => {
     let raf = 0;
+    let drawnAt = -1; // the playback time last drawn, so dragging the time bar while paused moves the ghost too
     const loop = () => {
-      if (dirty.current || latest.current.playback.state === 'playing') {
+      const { state, timeRef } = latest.current.playback;
+      if (dirty.current || state === 'playing' || (state !== 'stopped' && timeRef.current !== drawnAt)) {
         dirty.current = false;
+        drawnAt = timeRef.current;
         drawRef.current();
       }
       raf = requestAnimationFrame(loop);
