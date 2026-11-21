@@ -155,6 +155,9 @@ export function Inspector({
 
   if (i === 0) {
     const start = point.params ?? {};
+    const startAtGoal = spot?.kind === 'goal';
+    const backed = resolveParams(pp, start).reverse;
+    const setBacked = (v: boolean) => update(updatePointParams(path, 0, { reverse: v ? true : null }), 'pt-0-reverse');
     return (
       <div className="inspector scroll">
         <div className="section-head">
@@ -170,8 +173,15 @@ export function Inspector({
               title={faced ? 'Facing point 1' : '0 faces red, clockwise'} onChange={v => v != null && set({ theta: wrapDeg(v) }, 'theta')} />
           </div>
           {point.theta != null && faceRow('Face point 1', 'Start facing point 1 (its back, when that move is reversed)')}
+          {startAtGoal && (
+            <div className="row-between" title={`The robot can't be in the goal: it starts ${offsets.goalOffset} in from the goal's centre, along its heading, with the goal ${backed ? 'behind' : 'in front of'} it`}>
+              <span className="field-label">Back against the goal</span>
+              <Toggle checked={backed} title="Goal behind the robot (off: in front)" onChange={setBacked} />
+            </div>
+          )}
           <span className="hint">
             Where the path starts. The robot drives to the points after it.
+            {startAtGoal ? ` At a goal, the robot starts ${offsets.goalOffset} in from its centre, with the goal ${backed ? 'behind' : 'in front of'} it.` : ''}
             {auton?.first ? ' The auton sets its pose here.' : path.resetPose ? ' The path sets the pose here.' : ''}
             {auton && !auton.first && !path.resetPose
               ? ' After the path before it, the robot drives here first (unless it\'s already within 1 in).' : ''}
@@ -190,11 +200,13 @@ export function Inspector({
                 <NumberField label="Max" suffix="/127" step={5} nullable value={start.maxSpeed} placeholder={show(pp.maxSpeed, 127)}
                   onChange={v => update(updatePointParams(path, 0, { maxSpeed: speed(v) }), 'pt-0-max')} />
               </div>
-              <div className="row-between" title="Drive backwards to the start (forwards = false)">
-                <span className="field-label">Reverse</span>
-                <Toggle checked={resolveParams(pp, start).reverse} title="Drive backwards"
-                  onChange={v => update(updatePointParams(path, 0, { reverse: v ? true : null }), 'pt-0-reverse')} />
-              </div>
+              {/* at a goal, "Back against the goal" above is this same setting: backing in = forwards false */}
+              {!startAtGoal && (
+                <div className="row-between" title="Drive backwards to the start (forwards = false)">
+                  <span className="field-label">Reverse</span>
+                  <Toggle checked={backed} title="Drive backwards" onChange={setBacked} />
+                </div>
+              )}
             </div>
           </>
         )}

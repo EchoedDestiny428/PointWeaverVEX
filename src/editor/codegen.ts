@@ -1,6 +1,8 @@
 import type { AutonDefinition, PathDefinition } from './types';
 import { DEFAULTS } from './types';
-import { actionOf, arrivals, resolveParams, restOf, stepView, wrapDeg, type Offsets, type ResolvedParams } from './pathOps';
+import {
+  actionOf, arrivals, resolveParams, restOf, startOf, stepView, wrapDeg, type Offsets, type ResolvedParams,
+} from './pathOps';
 import { targetById, where } from './targets';
 
 /**
@@ -114,7 +116,7 @@ function pathLines(def: PathDefinition, step: number, opts: PathOpts): Line[] {
   const push = (text: string, point: number, call: CallKind) => lines.push({ text, source: { step, point, call } });
 
   if (pts.length && opts.setPose) {
-    const at = map(arr[0]);
+    const at = map(startOf(arr[0]));
     push(`chassis.setPose(${num(at.x)}, ${num(at.y)}, ${num(wrapDeg(at.theta))});`, 0, 'pose');
   }
 
@@ -233,7 +235,8 @@ function leadIn(from: Pose | null, view: PathDefinition, step: number, opts: Pat
   const p0 = view.points[0];
   if (!from || !p0 || view.resetPose) return [];
   const a0 = arrivals(view, opts.offsets)[0];
-  if (Math.hypot(a0.x - from.x, a0.y - from.y) <= LEAD_IN_GAP) return [];
+  const start = startOf(a0);
+  if (Math.hypot(start.x - from.x, start.y - from.y) <= LEAD_IN_GAP) return [];
   const r = resolveParams(view.params, p0.params);
   const pose = p0.theta != null;
   let ms = MEASURE_TIMEOUT;
@@ -255,7 +258,21 @@ function leadIn(from: Pose | null, view: PathDefinition, step: number, opts: Pat
   const text = pose
     ? `chassis.moveToPose(${num(to.x)}, ${num(to.y)}, ${num(wrapDeg(to.theta))}, ${num(ms)}${rest});`
     : `chassis.moveToPoint(${num(to.x)}, ${num(to.y)}, ${num(ms)}${rest});`;
-  return [{ text: opts.label ? `${text} // to the start of ${opts.label}` : text, source: { step, point: 0, call: 'move' } }];
+  const lines: Line[] = [{ text: opts.label ? `${text} // to the start of ${opts.label}` : text, source: { step, point: 0, call: 'move' } }];
+  const t = targetById(p0.target);
+  if (t?.kind === 'goal' && r.goalReset) {
+    // into the goal, like any goal point: once it's against it, put it where it really is
+    const g = opts.map({ x: t.x, y: t.y, theta: 0 });
+    lines.push({ text: 'chassis.waitUntilDone();', source: { step, point: 0, call: 'reset' } });
+    lines.push({
+      text: `chassis.setPoseFromGoal(${num(g.x)}, ${num(g.y)}${params([
+        ['forwards', r.reverse ? null : 'true'],
+        ['distance', num(opts.offsets.goalOffset)],
+      ])});`,
+      source: { step, point: 0, call: 'reset' },
+    });
+  }
+  return lines;
 }
 
 /**
@@ -308,7 +325,8 @@ export function autonCode(name: string, auton: AutonDefinition, paths: Record<st
   const firstDef = first && paths[first.path];
   const run: string[] = [];
   if (firstDef?.points.length && !firstDef.resetPose) {
-    const a = arrivals(stepView(firstDef, first), opts)[0];
+    // against the goal when it starts at one
+    const a = startOf(arrivals(stepView(firstDef, first), opts)[0]);
     run.push(`chassis.setPose(${num(a.x)}, ${num(a.y)}, ${num(wrapDeg(a.theta))});`);
   }
   run.push(...calls);

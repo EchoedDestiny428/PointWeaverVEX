@@ -9,7 +9,7 @@ import { poseAt, type GhostPose } from '../../editor/ghost';
 import { speedColor, speedStops } from '../../utils/speedColor';
 import {
   actionOf, arrivals, clampToField, donutAt, headingVector, insertPoint, offsetPoints, removePoint, resolveParams, restOf,
-  round1, shownHeading, updatePoint, updatePointParams, wrapDeg, type Arrival, type PointStart,
+  round1, shownHeading, startOf, updatePoint, updatePointParams, wrapDeg, type Arrival, type PointStart,
 } from '../../editor/pathOps';
 import { TARGETS, targetById, type Target } from '../../editor/targets';
 import { LEAD_IN_GAP } from '../../editor/codegen';
@@ -471,14 +471,15 @@ export function FieldCanvas(props: Props) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     if (autonView && steps[0]?.def.points.length) {
-      const a0 = arrivalsOf(steps[0].def)[0];
+      const a0 = startOf(arrivalsOf(steps[0].def)[0]);
       drawRobot(ctx, a0.x, a0.y, a0.theta, false, true);
     }
     // the move into each following path's point 0, from where the path before left the robot (run() drives it)
     let end: { x: number; y: number } | null = null;
     for (const s of steps) {
       const arr = arrivalsOf(s.def);
-      if (end && arr.length && !s.def.resetPose && Math.hypot(arr[0].x - end.x, arr[0].y - end.y) > LEAD_IN_GAP) {
+      const start = arr.length ? startOf(arr[0]) : null;
+      if (end && start && !s.def.resetPose && Math.hypot(start.x - end.x, start.y - end.y) > LEAD_IN_GAP) {
         const hot = s.step === hoverStep;
         ctx.strokeStyle = s.step === activeStep ? C.path : autonView ? (hot ? C.fg : C.muted) : hot ? C.contextHot : C.context;
         ctx.lineWidth = autonView ? (hot ? 2.25 : 1.5) : 1.25;
@@ -753,7 +754,8 @@ export function FieldCanvas(props: Props) {
     const arr = arrivalsOf(path);
 
     // start footprint: solid where the pose is set (a path of its own, the auton's first step, or reset pose)
-    drawRobot(ctx, arr[0].x, arr[0].y, arr[0].theta, false, activeStep == null || activeStep === 0 || !!path.resetPose);
+    const s0 = startOf(arr[0]);
+    drawRobot(ctx, s0.x, s0.y, s0.theta, false, activeStep == null || activeStep === 0 || !!path.resetPose);
 
     // the line the robot's centre drives (claw spots stop short of their point)
     if (pts.length > 1) {

@@ -177,6 +177,9 @@ export interface Offsets {
   goalOffset: number;
 }
 
+/** Where the robot really starts a path: against the goal when point 0 is at one. */
+export const startOf = (a: Arrival) => ({ x: (a.rest ?? a).x, y: (a.rest ?? a).y, theta: a.theta });
+
 /** Where the robot is once it's done with a point (after any goal reset). */
 export const restOf = (a: Arrival) => a.donut ?? a.rest ?? a;
 
@@ -231,8 +234,9 @@ export function arrivals(def: PathDefinition, offsets: Offsets): Arrival[] {
 
     if (t?.kind === 'goal') {
       const a: Arrival = { x: p.x, y: p.y, theta, final: theta };
-      if (i > 0 && r.goalReset && offsets.goalOffset > 0) {
-        // what chassis.setPoseFromGoal does: the goal is goalOffset in front of the robot (behind it when reversing)
+      // where the robot really is against the goal: what chassis.setPoseFromGoal does, the goal goalOffset in front
+      // of the robot (behind it when it backs in). A path that starts at a goal always starts there.
+      if ((i === 0 || r.goalReset) && offsets.goalOffset > 0) {
         const f = headingVector(theta);
         const side = r.reverse ? 1 : -1;
         a.rest = { x: p.x + side * f.x * offsets.goalOffset, y: p.y + side * f.y * offsets.goalOffset };

@@ -274,6 +274,50 @@ describe('code', () => {
     });
   });
 
+  describe('starting at a goal', () => {
+    const atGoal = (reverse: boolean) => path([
+      { x: 24, y: 48, theta: 0, target: 'goal-blue-2', params: reverse ? { reverse: true } : null },
+      { x: 24, y: 80 },
+    ]);
+
+    it('starts the robot against the goal, on the side its direction says', () => {
+      // goal in front (facing +X into it): the centre is 7.5 in short of it
+      const front = arrivals(atGoal(false), opts)[0];
+      expect(front.rest!.x).toBeCloseTo(16.5);
+      expect(front.rest!.y).toBeCloseTo(48);
+      // backed against it: 7.5 in the other way
+      const back = arrivals(atGoal(true), opts)[0];
+      expect(back.rest!.x).toBeCloseTo(31.5);
+      const code = autonCode('A', { steps: [{ path: 'g' }] }, { g: atGoal(true) }, opts);
+      expect(code).toContain('    chassis.setPose(31.5, 48, 0);');
+      // the next move starts there
+      expect(arrivals(atGoal(true), opts)[1].theta).toBeCloseTo(-wrapDeg(Math.atan2(32, -7.5) * 180 / Math.PI));
+    });
+
+    it('drives into it and resets when a later path starts there', () => {
+      const before = path([{ x: 60, y: 100, theta: 0 }, { x: 60, y: 60 }]);
+      const code = autonCode('A', { steps: [{ path: 'before' }, { path: 'g' }] }, { before, g: atGoal(true) }, opts);
+      expect(code).toContain([
+        '    chassis.moveToPose(24, 48, 0, 2000, {.forwards = false}); // to the start of g()',
+        '    chassis.waitUntilDone();',
+        '    chassis.setPoseFromGoal(24, 48, {.distance = 7.5});',
+        '    g();',
+      ].join('\n'));
+    });
+
+    it("doesn't when the path before left the robot against that goal", () => {
+      const into = path([{ x: 60, y: 48, theta: 0 }, { x: 24, y: 48, target: 'goal-blue-2', params: { reverse: true } }]);
+      const code = autonCode('A', { steps: [{ path: 'into' }, { path: 'g' }] }, { into, g: atGoal(true) }, opts);
+      expect(code).toContain('    into();\n    g();');
+    });
+
+    it('starts the ghost there', () => {
+      const ghost = simulateSteps([{ def: atGoal(true) }], robot, 15);
+      expect(ghost.poses[0].x).toBeCloseTo(31.5, 1);
+      expect(ghost.poses[0].y).toBeCloseTo(48, 1);
+    });
+  });
+
   it("leaves crimson::DonutParams' default speeds out", () => {
     const p = path([{ x: 18, y: 72, theta: 0 }, { x: 24, y: 48, target: 'goal-blue-2', theta: 90, action: 'donut' }]);
     expect(pathCode('p', p, opts)).toContain('    chassis.donut(90, 1000);');

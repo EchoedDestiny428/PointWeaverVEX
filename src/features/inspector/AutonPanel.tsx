@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { AutonDefinition, PathDefinition } from '../../editor/types';
 import type { HistoryMode } from '../../hooks/useLibrary';
-import { arrivals, stepView, type Offsets } from '../../editor/pathOps';
+import { arrivals, startOf, stepView, type Offsets } from '../../editor/pathOps';
 import { Icon, IconButton } from '../../components/Icon';
 import { MenuButton } from '../../components/Menu';
 import { Toggle } from '../../components/Controls';
@@ -47,7 +47,7 @@ export function AutonPanel({
   };
 
   const first = steps[0] && paths[steps[0].path];
-  const start = first?.points.length ? arrivals(stepView(first, steps[0]), offsets)[0] : null;
+  const start = first?.points.length ? startOf(arrivals(stepView(first, steps[0]), offsets)[0]) : null;
   const library = Object.keys(paths).sort((a, b) => a.localeCompare(b));
   /** what can go in at a position: a new path, or one from the library */
   const choices = (at: number) => [
