@@ -460,6 +460,21 @@ describe('ghost', () => {
     expect(ghost.timeouts).toEqual([{ step: 0, point: 1, call: 'move' }]);
   });
 
+  it('donuts at the measured rate (about 1 s for 90 degrees), and the setting changes it', () => {
+    const def = path([
+      { x: 60, y: 48, theta: 180 },
+      { x: 24, y: 48, target: 'goal-blue-2', theta: 90, action: 'donut', params: { reverse: true } },
+    ]);
+    const donutTime = (r: typeof robot) => {
+      const est = estimatesFor(def, r).get('1:turn')!;
+      // the estimate is the ghost's time x1.25 + leeway, rounded up to 50 ms: back out the time
+      return (est - r.timeoutLeeway) / 1.25;
+    };
+    expect(donutTime(robot)).toBeGreaterThan(800);
+    expect(donutTime(robot)).toBeLessThan(1150);
+    expect(donutTime({ ...robot, donutRate: 200 })).toBeLessThan(donutTime(robot) * 0.65);
+  });
+
   it('donuts around the goal it reset against', () => {
     const def = path([
       { x: 60, y: 72, theta: 0 },

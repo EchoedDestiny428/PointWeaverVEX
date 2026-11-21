@@ -10,6 +10,11 @@ export interface RobotConfig {
   clawOffset: number;
   /** robot centre to the centre of the goal it's on (in): where a goal reset puts the robot, and the donut's pivot */
   goalOffset: number;
+  /**
+   * How fast a donut turns (deg/s) at the default fast 100 / slow 75; other speeds scale it by (fast + slow) / 175.
+   * Measured, not worked out: the robot drags the goal and its wheels slide sideways, so it's far slower than a turn.
+   */
+  donutRate: number;
   /** ms added to every estimated timeout (after the extra quarter) */
   timeoutLeeway: number;
   /**
@@ -47,6 +52,7 @@ export const ROBOT_FIELDS: Array<{
   { key: "clawOffset", label: "Claw offset (robot centre to claw centre)", unit: "in", min: 0, max: 15, step: 0.1 },
   { key: "goalOffset", label: "Goal offset (robot centre to the centre of the goal it's on)", unit: "in", min: 0, max: 15, step: 0.1 },
   { key: "timeoutLeeway", label: "Estimated timeout leeway (added to every estimate)", unit: "ms", min: 0, max: 3000, step: 50 },
+  { key: "donutRate", label: "Donut turn rate at fast 100 / slow 75 (scales with fast + slow). Time a real donut: about 1 s for 90 deg is 100", unit: "°/s", min: 10, max: 720, step: 5 },
   { key: "linearSmallError", label: "Move small exit: within this far (linear_controller smallError)", unit: "in", min: 0.05, max: 6, step: 0.05, exit: true },
   { key: "linearSmallTime", label: "...for this long (linear_controller smallErrorTimeout)", unit: "ms", min: 0, max: 2000, step: 10, exit: true },
   { key: "linearLargeError", label: "Move large exit: within this far (linear_controller largeError)", unit: "in", min: 0.1, max: 12, step: 0.1, exit: true },

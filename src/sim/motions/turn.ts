@@ -39,6 +39,11 @@ export abstract class TurnMotion implements Motion {
     integrate(state, dt);
   }
 
+  /** The fastest it turns (deg/s): the robot's turn rate at this turn's max speed. */
+  protected rateCap(robot: RobotConfig): number {
+    return robot.maxTurnRate * speedFraction(this.params.maxSpeed);
+  }
+
   step(state: DriveState, dt: number, robot: RobotConfig): MotionStatus {
     const target = this.targetHeading(state);
     if (this.fixedDirection === null) {
@@ -57,8 +62,8 @@ export abstract class TurnMotion implements Motion {
     const large = this.largeExit.update(Math.abs(error) <= robot.angularLargeError, dt, robot.angularLargeTime);
     if (small || large) return "done";
 
-    const cap = robot.maxTurnRate * speedFraction(this.params.maxSpeed);
-    const floor = robot.maxTurnRate * speedFraction(this.params.minSpeed);
+    const cap = this.rateCap(robot);
+    const floor = Math.min(cap, robot.maxTurnRate * speedFraction(this.params.minSpeed));
     const braking = Math.sqrt(2 * TURN_BRAKING_SHARE * robot.turnAcceleration * Math.abs(error));
     const magnitude = Math.max(floor, Math.min(cap, braking));
     state.w = approach(state.w, Math.sign(error) * magnitude, robot.turnAcceleration * dt);
@@ -148,6 +153,12 @@ export class Donut extends TurnMotion {
 
   protected targetHeading(): number {
     return this.heading;
+  }
+
+  /** The robot's measured donut rate, scaled by how hard the wheels are driven (fast + slow, 175 by default). */
+  protected override rateCap(robot: RobotConfig): number {
+    const rate = robot.donutRate ?? robot.maxTurnRate * speedFraction((this.donut.fastSpeed + this.donut.slowSpeed) / 2);
+    return Math.max(1, rate * ((this.donut.fastSpeed + this.donut.slowSpeed) / 175));
   }
 
   protected override rotate(state: DriveState, dt: number, robot: RobotConfig): void {

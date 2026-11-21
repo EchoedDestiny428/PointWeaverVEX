@@ -64,7 +64,7 @@ Editing a path changes it in every auton that uses it, including the turned uses
 
 The toolbar shows the ghost's run time. It turns bold with a ⚠ when the run is over the limit (15 s, or 60 s with **Skills** on), or when a move hits its timeout. That point gets a dashed ring.
 
-**Robot** (bottom left) sets the ghost's size and speed, and the claw and goal offsets. Only the two offsets change the code.
+**Robot** (bottom left) sets the ghost's size and speed, and the claw and goal offsets. Only the two offsets change the code. **Donut** is how fast a donut turns (100°/s, measured as about 1 s for 90°, at fast 100 / slow 75; other speeds scale with fast + slow). A donut drags the goal and slides the wheels sideways, so it's much slower than a turn.
 
 Its **Exit ranges** are LemLib's exit conditions, copied from `lemlib::ControllerSettings` in the robot's `robotconfig.cpp`. A move ends once it stays within 0.2 in for 100 ms, or within 1 in for 500 ms. A turn or donut ends within 1° for 50 ms, or within 3° for 300 ms. The ghost (and so the estimated timeouts) uses them; change them here when you retune the robot.
 
