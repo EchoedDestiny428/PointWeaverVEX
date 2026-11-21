@@ -299,6 +299,7 @@ export default function App() {
               onAdd={addPoint}
               onMove={reorder}
               timeouts={pointTimeouts}
+              offsets={robot}
             />
             <Inspector
               path={path}
@@ -310,6 +311,7 @@ export default function App() {
               onSelect={setSelectedIndex}
               duration={ghost.duration}
               estimates={estimates}
+              offsets={robot}
               auton={focus?.kind === 'step' && currentAutonName
                 ? { name: currentAutonName, rotated, first: focus.step === 0, onRotate: setStepRotate }
                 : null}

@@ -165,6 +165,10 @@ export interface Arrival {
    * (clockwise positive), `reach` how far ahead of the centre the pivot is (negative: behind).
    */
   donut?: { x: number; y: number; pivot: { x: number; y: number }; from: number; sweep: number; reach: number };
+  /** which way the robot faces once it's done with the point (after any turn or donut) */
+  final: number;
+  /** the heading came from facing the next point (not the point's own number) */
+  faced?: boolean;
 }
 
 /** The robot's claw and goal offsets (in), from the robot settings. */
@@ -193,40 +197,78 @@ export function arrivals(def: PathDefinition, offsets: Offsets): Arrival[] {
   def.points.forEach((p, i) => {
     const prev = out[i - 1] ? restOf(out[i - 1]) : undefined;
     const r = resolveParams(def.params, p.params);
+    const action = actionOf(p);
+    const t = targetById(p.target);
+    const claw = t && t.kind !== 'goal' && offsets.clawOffset > 0 ? offsets.clawOffset : 0;
+
+    // "face the next point": the heading from somewhere to it (its back when the next move reverses)
+    const next = def.points[i + 1];
+    const face = !!p.faceNext && p.theta != null && !!next;
+    const nextReverse = next ? resolveParams(def.params, next.params).reverse : false;
+    const toward = (from: { x: number; y: number }, fallback: number) =>
+      next && Math.hypot(next.x - from.x, next.y - from.y) > 1e-6
+        ? wrapDeg(headingOf(next.x - from.x, next.y - from.y) + (nextReverse ? 180 : 0))
+        : fallback;
+
+    // the heading it arrives with
     const travel = prev && Math.hypot(p.x - prev.x, p.y - prev.y) > 1e-6 ? headingOf(p.x - prev.x, p.y - prev.y) : null;
     let theta: number;
-    if (p.theta != null && (i === 0 || actionOf(p) === 'pose')) theta = p.theta;
-    else if (travel != null) theta = wrapDeg(travel + (r.reverse ? 180 : 0));
-    else theta = p.theta ?? out[i - 1]?.theta ?? 0;
-    const t = targetById(p.target);
+    if (p.theta != null && (i === 0 || action === 'pose')) {
+      theta = p.theta;
+      if (face) {
+        // arrive facing the next point; with a claw the centre moves with the heading, so settle it in a few passes
+        theta = toward(p, p.theta);
+        for (let k = 0; k < 3 && claw; k++) {
+          const f = headingVector(theta);
+          theta = toward({ x: p.x - f.x * claw, y: p.y - f.y * claw }, theta);
+        }
+      }
+    } else if (travel != null) {
+      theta = wrapDeg(travel + (r.reverse ? 180 : 0));
+    } else {
+      theta = p.theta ?? out[i - 1]?.final ?? 0;
+    }
+
     if (t?.kind === 'goal') {
-      const a: Arrival = { x: p.x, y: p.y, theta };
+      const a: Arrival = { x: p.x, y: p.y, theta, final: theta };
       if (i > 0 && r.goalReset && offsets.goalOffset > 0) {
         // what chassis.setPoseFromGoal does: the goal is goalOffset in front of the robot (behind it when reversing)
         const f = headingVector(theta);
         const side = r.reverse ? 1 : -1;
         a.rest = { x: p.x + side * f.x * offsets.goalOffset, y: p.y + side * f.y * offsets.goalOffset };
       }
-      if (i > 0 && actionOf(p) === 'donut' && offsets.goalOffset > 0) {
+      const base = a.rest ?? a;
+      if (i > 0 && action === 'donut' && offsets.goalOffset > 0) {
         // what chassis.donut does: it spins around a point goalOffset ahead (behind when orbiting behind), which
-        // stays put, so the centre swings round it by however far the robot turns
-        const base = a.rest ?? a;
+        // stays put, so the centre swings round it by however far the robot turns. Facing the next point from the
+        // end of the orbit is the same as facing it from the pivot.
         const reach = (r.donutBehind ? -1 : 1) * offsets.goalOffset;
         const f = headingVector(theta);
         const pivot = { x: base.x + f.x * reach, y: base.y + f.y * reach };
-        const donut = { x: 0, y: 0, pivot, from: theta, sweep: angleError(p.theta!, theta, r.turnDirection), reach };
+        a.final = face ? toward(pivot, p.theta!) : p.theta!;
+        const donut = { x: 0, y: 0, pivot, from: theta, sweep: angleError(a.final, theta, r.turnDirection), reach };
         a.donut = { ...donut, ...donutAt(donut, 1) };
+      } else if (i > 0 && action === 'turn') {
+        a.final = face ? toward(base, p.theta!) : p.theta!;
       }
+      a.faced = face;
       out.push(a);
       return;
     }
-    if (!t || offsets.clawOffset <= 0) {
-      out.push({ x: p.x, y: p.y, theta });
-      return;
-    }
+
     // claw on the spot: the centre stops clawOffset behind it, along the way the robot faces as it arrives
     const f = headingVector(theta);
-    out.push({ x: p.x - f.x * offsets.clawOffset, y: p.y - f.y * offsets.clawOffset, theta });
+    const a: Arrival = { x: p.x - f.x * claw, y: p.y - f.y * claw, theta, final: theta, faced: face };
+    if (i > 0 && action === 'turn') a.final = face ? toward(a, p.theta!) : p.theta!;
+    out.push(a);
   });
   return out;
+}
+
+/** The heading to show for a point: its own, or the one it gets from facing the next point. Null without one. */
+export function shownHeading(p: PathPoint, a: Arrival | undefined, i: number): number | null {
+  if (p.theta == null) return null;
+  if (!a || !p.faceNext) return p.theta;
+  const action = actionOf(p);
+  return i === 0 || action === 'pose' ? a.theta : a.final;
 }

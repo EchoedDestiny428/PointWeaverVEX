@@ -34,6 +34,8 @@ The app isn't code-signed, so Windows may say *"Windows protected your PC"*. Cli
    - **Donut**: `chassis.moveToPoint`, then `chassis.donut`, Crimson's orbit turn. Only at a goal.
 
    With the heading off, the point is a plain `chassis.moveToPoint`. Turns and donuts have their own timeout, separate from the move's.
+
+   **Face the next point** uses the direction to the next point instead of a number. Turn becomes `chassis.turnToPoint`, Donut donuts until the robot faces it, and Drive into arrives facing it. On point 0 it starts the robot facing point 1. When the next move is reversed, the robot's back faces it instead. The heading handle turns dashed; drag it to set your own heading again.
 6. **Slow down for the last** (a slider on the point, or drag the diamond on the field) drives the last part of a move at **Slow max**.
 7. Open the auton in the sidebar to see all of its paths. Add a path you already have with **+** in the auton's path list, or drag it in from **Paths** on the left. Click ↻ on a path to turn that use 180° about the field centre. The goals are placed point-symmetrically, so a move made on blue's half works the same way on red's half.
 8. Open **Output code** and click the copy button.

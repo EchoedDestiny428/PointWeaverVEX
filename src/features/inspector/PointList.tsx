@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PathDefinition } from '../../editor/types';
-import { actionOf, resolveParams } from '../../editor/pathOps';
+import { actionOf, arrivals, resolveParams, shownHeading, type Offsets } from '../../editor/pathOps';
 import { targetById } from '../../editor/targets';
 import { HeadingGlyph, IconButton } from '../../components/Icon';
 
@@ -15,6 +15,7 @@ interface Props {
   onAdd: () => void;
   onMove: (from: number, to: number) => void;
   timeouts: number[];
+  offsets: Offsets;
 }
 
 /** What a point makes in code, for the row's tag. */
@@ -27,7 +28,7 @@ const callOf = (p: PathDefinition['points'][number], i: number) => {
  * Every point in order, so overlapping points on the field are still reachable. Drag rows to reorder.
  * Clicking a row selects just that point.
  */
-export function PointList({ path, selectedIndex, selection, hoverIndex, onSelect, onHover, onAdd, onMove, timeouts }: Props) {
+export function PointList({ path, selectedIndex, selection, hoverIndex, onSelect, onHover, onAdd, onMove, timeouts, offsets }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
@@ -36,6 +37,9 @@ export function PointList({ path, selectedIndex, selection, hoverIndex, onSelect
     if (selectedIndex == null) return;
     listRef.current?.querySelector(`[data-index="${selectedIndex}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [selectedIndex]);
+
+  // which way each point really faces (facing the next point is worked out from where the robot is)
+  const arr = arrivals(path, offsets);
 
   const endDrag = () => {
     setDragFrom(null);
@@ -50,6 +54,8 @@ export function PointList({ path, selectedIndex, selection, hoverIndex, onSelect
       </div>
       <div className="list scroll points" ref={listRef} onMouseLeave={() => onHover(null)}>
         {path.points.map((p, i) => {
+          const heading = shownHeading(p, arr[i], i);
+          const faced = !!arr[i]?.faced;
           const call = callOf(p, i);
           const r = resolveParams(path.params, p.params);
           const reverse = i > 0 && r.reverse;
@@ -86,8 +92,10 @@ export function PointList({ path, selectedIndex, selection, hoverIndex, onSelect
               <span className={`idx ${spot ? 'snapped-idx' : ''}`} title={spot?.label}>{i}</span>
               <span className="num">{p.x.toFixed(1)}</span>
               <span className="num">{p.y.toFixed(1)}</span>
-              <span className="heading" title={p.theta != null ? `${p.theta}°` : 'No heading'}>
-                {p.theta != null ? <><HeadingGlyph theta={p.theta} /><span className="num">{Math.round(p.theta)}°</span></> : <span className="ring" />}
+              <span className="heading" title={heading == null ? 'No heading' : faced ? `${Math.round(heading)}°, facing point ${i + 1}` : `${heading}°`}>
+                {heading != null
+                  ? <><HeadingGlyph theta={heading} /><span className="num">{faced ? '→' : ''}{Math.round(heading)}°</span></>
+                  : <span className="ring" />}
               </span>
               <span className="flags">
                 {timeouts.includes(i)

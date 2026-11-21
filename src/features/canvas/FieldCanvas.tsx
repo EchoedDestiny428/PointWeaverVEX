@@ -9,7 +9,7 @@ import { poseAt, type GhostPose } from '../../editor/ghost';
 import { speedColor, speedStops } from '../../utils/speedColor';
 import {
   actionOf, arrivals, clampToField, donutAt, headingVector, insertPoint, offsetPoints, removePoint, resolveParams, restOf,
-  round1, updatePoint, updatePointParams, wrapDeg, type Arrival, type PointStart,
+  round1, shownHeading, updatePoint, updatePointParams, wrapDeg, type Arrival, type PointStart,
 } from '../../editor/pathOps';
 import { TARGETS, targetById, type Target } from '../../editor/targets';
 import { drawField } from './fieldArt';
@@ -197,15 +197,18 @@ export function FieldCanvas(props: Props) {
 
   // ---- hit testing ----
   const hitTest = (sx: number, sy: number): Hit => {
-    const pts = latest.current.path?.points ?? [];
+    const path = latest.current.path;
+    const pts = path?.points ?? [];
+    const arr = path ? arrivalsOf(path) : [];
     const selected = latest.current.selection.filter(i => i < pts.length);
     // selected points first (they're drawn on top), then the rest, last drawn first
     const order = [...selected, ...pts.map((_, i) => i).reverse().filter(i => !selected.includes(i))];
     for (const i of order) {
       const p = pts[i];
       const [px, py] = toScreen(p.x, p.y);
-      if (p.theta != null) {
-        const [dx, dy] = dir(p.theta);
+      const heading = shownHeading(p, arr[i], i);
+      if (heading != null) {
+        const [dx, dy] = dir(heading);
         if (Math.hypot(sx - (px + dx * HEADING_LEN), sy - (py + dy * HEADING_LEN)) < HIT_TIP) {
           return { index: i, mode: 'heading' };
         }
@@ -474,7 +477,7 @@ export function FieldCanvas(props: Props) {
       if (s.step === activeStep) continue;
       // through where the robot's centre goes (claw spots stop short of their point)
       const arr = arrivalsOf(s.def);
-      const pts = arr.map((a, i) => ({ ...a, theta: s.def.points[i].theta }));
+      const pts = arr.map((a, i) => ({ ...a, theta: shownHeading(s.def.points[i], a, i) }));
       if (!pts.length) continue;
       const hot = s.step === hoverStep;
       const color = autonView ? (hot ? C.fg : C.muted) : hot ? C.contextHot : C.context;
@@ -693,8 +696,7 @@ export function FieldCanvas(props: Props) {
     // where the robot ends up: against the goal after a reset, round the goal after a donut, otherwise where it's
     // sent; facing the point's heading once it has turned (or donuted) to it
     const a = restOf(arrival);
-    const action = actionOf(p);
-    const theta = action === 'turn' || action === 'donut' ? p.theta! : arrival.theta;
+    const theta = arrival.final;
     const { robot } = latest.current;
     const f = headingVector(theta);
     const side = { x: -f.y, y: f.x };
@@ -830,22 +832,28 @@ export function FieldCanvas(props: Props) {
         ctx.fill();
       }
 
-      if (p.theta != null) {
-        const [dx, dy] = dir(p.theta);
+      const heading = shownHeading(p, arr[i], i);
+      if (heading != null) {
+        // facing the next point: a dashed handle (dragging it sets a heading of its own)
+        const faced = !!arr[i]?.faced;
+        const [dx, dy] = dir(heading);
         const tx = sx + dx * HEADING_LEN;
         const ty = sy + dy * HEADING_LEN;
         ctx.strokeStyle = sel ? C.fg : C.muted;
         ctx.lineWidth = 1.5;
+        if (faced) ctx.setLineDash([3, 2.5]);
         ctx.beginPath();
         ctx.moveTo(sx, sy);
         ctx.lineTo(tx, ty);
         ctx.stroke();
-        ctx.fillStyle = sel ? C.fg : C.bg;
+        ctx.setLineDash([]);
+        ctx.fillStyle = sel && !faced ? C.fg : C.bg;
         ctx.beginPath();
         ctx.arc(tx, ty, 3.2, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
-        if (i > 0 && (p.action === 'turn' || p.action === 'donut')) drawTurnMark(ctx, sx, sy, p.action === 'donut', sel ? C.fg : C.muted);
+        const action = actionOf(p);
+        if (i > 0 && (action === 'turn' || action === 'donut')) drawTurnMark(ctx, sx, sy, action === 'donut', sel ? C.fg : C.muted);
       }
 
       if (p.target && targetById(p.target)) {
@@ -1097,7 +1105,7 @@ export function FieldCanvas(props: Props) {
         // clockwise from +X
         let deg = (Math.atan2(-(w.y - p.y), w.x - p.x) * 180) / Math.PI;
         deg = e.shiftKey ? Math.round(deg / 15) * 15 : Math.round(deg);
-        update(updatePoint(path, d.index, { theta: wrapDeg(deg) }), false);
+        update(updatePoint(path, d.index, { theta: wrapDeg(deg), faceNext: null }), false);
       }
     }
   };
@@ -1145,11 +1153,12 @@ export function FieldCanvas(props: Props) {
 
     // scroll over the selected heading point = rotate it (down turns clockwise)
     const p = selectedIndex != null ? path?.points[selectedIndex] : null;
-    if (path && p && p.theta != null) {
+    const heading = path && p ? shownHeading(p, arrivalsOf(path)[selectedIndex!], selectedIndex!) : null;
+    if (path && p && heading != null) {
       const [px, py] = toScreen(p.x, p.y);
       if (Math.hypot(sx - px, sy - py) < HEADING_LEN + 6) {
         const delta = e.deltaY > 0 ? 5 : -5;
-        update(updatePoint(path, selectedIndex!, { theta: wrapDeg(p.theta + delta) }), `wheel-${selectedIndex}`);
+        update(updatePoint(path, selectedIndex!, { theta: wrapDeg(heading + delta), faceNext: null }), `wheel-${selectedIndex}`);
         return;
       }
     }

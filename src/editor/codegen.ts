@@ -14,6 +14,7 @@ import { targetById, where } from './targets';
  * the pose from the goal, goalOffset out from its centre. A point at a pin or loader stops where the claw is on it
  * (see arrivals in pathOps).
  * A slowdown drives the first part of the move, then cancels it and drives the rest at a lower max speed.
+ * A heading can face the next point instead: turnToPoint, a donut (or moveToPose) to the heading that faces it.
  * Timeouts nobody set come from the ghost (estimates); without any, LemLib-ish defaults.
  */
 
@@ -124,9 +125,15 @@ function pathLines(def: PathDefinition, step: number, opts: PathOpts): Line[] {
       const set = call === 'turn' ? r.turnTimeout : r.timeout;
       return set ?? opts.estimates?.get(`${i}:${call}`) ?? (call === 'turn' ? DEFAULTS.turnTimeout : DEFAULTS.timeout);
     };
-    const comment = !t ? '' : t.kind === 'goal' ? ` // ${t.label}` : ` // claw on ${t.label} ${where(t)}`;
-    const to = map({ x: a.x, y: a.y, theta: p.theta ?? 0 });
+    const facing = a.faced ? `facing point ${i + 1}` : '';
+    const comment = [
+      !t ? '' : t.kind === 'goal' ? t.label : `claw on ${t.label} ${where(t)}`,
+      action === 'pose' ? facing : '',
+    ].filter(Boolean).join(', ');
+    const to = map({ x: a.x, y: a.y, theta: a.theta });
     const theta = num(wrapDeg(to.theta));
+    // the heading after a turn or donut (its own, or the one facing the next point)
+    const after = num(wrapDeg(map({ x: a.x, y: a.y, theta: a.final }).theta));
     const move = (maxSpeed: number, ms: number) => {
       const rest = params([
         ['forwards', r.reverse ? 'false' : null],
@@ -143,12 +150,12 @@ function pathLines(def: PathDefinition, step: number, opts: PathOpts): Line[] {
       // full speed until the last part, then the same move again, slower
       const from = restOf(arr[i - 1]);
       const cut = (1 - r.slowdown) * Math.hypot(a.x - from.x, a.y - from.y);
-      push(`${move(r.maxSpeed, timeout('move'))}${comment}`, i, 'move');
+      push(`${move(r.maxSpeed, timeout('move'))}${comment ? ` // ${comment}` : ''}`, i, 'move');
       push(`chassis.waitUntil(${num(cut)});`, i, 'move');
       push('chassis.cancelMotion();', i, 'move');
       push(`${move(Math.min(r.maxSpeed, r.slowSpeed), timeout('slow'))} // last ${Math.round(r.slowdown * 100)}%`, i, 'slow');
     } else {
-      push(`${move(r.maxSpeed, timeout('move'))}${comment}`, i, 'move');
+      push(`${move(r.maxSpeed, timeout('move'))}${comment ? ` // ${comment}` : ''}`, i, 'move');
     }
 
     if (t?.kind === 'goal' && r.goalReset) {
@@ -162,16 +169,24 @@ function pathLines(def: PathDefinition, step: number, opts: PathOpts): Line[] {
       ])});`, i, 'reset');
     }
 
-    if (action === 'turn') {
-      push(`chassis.turnToHeading(${theta}, ${num(timeout('turn'))}${params([['direction', direction(r.turnDirection)]])});`, i, 'turn');
+    if (action === 'turn' && a.faced) {
+      // LemLib aims at the point itself, from wherever the robot really is
+      const n = map({ x: pts[i + 1].x, y: pts[i + 1].y, theta: 0 });
+      const nextReverse = resolveParams(def.params, pts[i + 1].params).reverse;
+      push(`chassis.turnToPoint(${num(n.x)}, ${num(n.y)}, ${num(timeout('turn'))}${params([
+        ['forwards', nextReverse ? 'false' : null],
+        ['direction', direction(r.turnDirection)],
+      ])}); // ${facing}`, i, 'turn');
+    } else if (action === 'turn') {
+      push(`chassis.turnToHeading(${after}, ${num(timeout('turn'))}${params([['direction', direction(r.turnDirection)]])});`, i, 'turn');
     } else if (action === 'donut') {
-      push(`chassis.donut(${theta}, ${num(timeout('turn'))}${params([
+      push(`chassis.donut(${after}, ${num(timeout('turn'))}${params([
         ['direction', direction(r.turnDirection)],
         ['forwards', r.donutBehind ? 'false' : null],
         // crimson::DonutParams defaults (prelude-to-chaos: include/motion/chassis.hpp)
         ['fastSpeed', r.donutFast !== DEFAULTS.donutFast ? num(r.donutFast) : null],
         ['slowSpeed', r.donutSlow !== DEFAULTS.donutSlow ? num(r.donutSlow) : null],
-      ])});`, i, 'turn');
+      ])});${a.faced ? ` // ${facing}` : ''}`, i, 'turn');
     }
   }
   return lines;

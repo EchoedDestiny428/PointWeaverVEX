@@ -55,6 +55,12 @@ export interface PathPoint {
   action?: HeadingAction | null;
   /** snapped to a goal, pin or loader (src/editor/targets.ts); x/y are then that spot */
   target?: string | null;
+  /**
+   * The heading is "toward the next point" instead of theta (theta still has to be set, as the heading switch):
+   * turn = chassis.turnToPoint, donut = donut to face it, drive into = moveToPose arriving facing it, point 0 =
+   * start facing point 1. The robot's back faces it when the next move is reversed.
+   */
+  faceNext?: boolean | null;
   params?: MoveParams | null;
 }
 

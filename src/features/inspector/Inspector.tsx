@@ -3,7 +3,9 @@ import { DEFAULTS } from '../../editor/types';
 import type { HistoryMode } from '../../hooks/useLibrary';
 import { IconButton } from '../../components/Icon';
 import { NumberField, Segmented, Toggle } from '../../components/Controls';
-import { removePoint, resolveParams, updatePathParams, updatePoint, updatePointParams, wrapDeg } from '../../editor/pathOps';
+import {
+  arrivals, removePoint, resolveParams, shownHeading, updatePathParams, updatePoint, updatePointParams, wrapDeg, type Offsets,
+} from '../../editor/pathOps';
 import { estimateKey, type Estimates } from '../../editor/codegen';
 import { targetById } from '../../editor/targets';
 
@@ -21,6 +23,8 @@ interface Props {
   auton: { name: string; rotated: boolean; first: boolean; onRotate: (v: boolean) => void } | null;
   /** the ghost's suggested timeouts for this path */
   estimates: Estimates;
+  /** the robot's claw and goal offsets (where the robot ends up, so which way the next point is) */
+  offsets: Offsets;
 }
 
 const show = (v: number | null | undefined, fallback: number | string) => (v != null ? String(v) : String(fallback));
@@ -40,7 +44,7 @@ const DIRECTIONS: { value: TurnDirection; label: string; title: string }[] = [
 ];
 
 export function Inspector({
-  path, name, selectedIndex, selectionCount, onDeleteSelection, update, onSelect, duration, auton, estimates,
+  path, name, selectedIndex, selectionCount, onDeleteSelection, update, onSelect, duration, auton, estimates, offsets,
 }: Props) {
   const point = selectedIndex != null ? path.points[selectedIndex] : null;
   const pp = path.params ?? {};
@@ -115,6 +119,18 @@ export function Inspector({
       onSelect(null);
     }} />
   );
+  // the heading the point really gets: its own, or facing the next point
+  const arrival = arrivals(path, offsets)[i];
+  const shown = shownHeading(point, arrival, i);
+  const hasNext = i < path.points.length - 1;
+  const faced = !!arrival?.faced;
+  const faceRow = (label: string, title: string) => (
+    <div className="row-between" title={hasNext ? title : 'This is the last point of the path, so there is no next point to face'}>
+      <span className="field-label">{label}</span>
+      <Toggle checked={!!point.faceNext && hasNext} disabled={!hasNext} title={label}
+        onChange={v => update(updatePoint(path, i, { faceNext: v ? true : null, ...(v ? {} : { theta: shown ?? point.theta }) }))} />
+    </div>
+  );
   const spot = targetById(point.target);
   // typing a position takes the point off its goal, pin or loader
   const position = (
@@ -149,9 +165,10 @@ export function Inspector({
           <div className="heading-row">
             <Toggle checked={point.theta != null} title="Start heading"
               onChange={on => update(updatePoint(path, i, { theta: on ? 0 : null }))} />
-            <NumberField label="Heading" suffix="°" step={5} value={point.theta} disabled={point.theta == null} placeholder="0"
-              title="0 faces red, clockwise" onChange={v => v != null && set({ theta: wrapDeg(v) }, 'theta')} />
+            <NumberField label="Heading" suffix="°" step={5} value={shown} disabled={point.theta == null || faced} placeholder="0"
+              title={faced ? 'Facing point 1' : '0 faces red, clockwise'} onChange={v => v != null && set({ theta: wrapDeg(v) }, 'theta')} />
           </div>
+          {point.theta != null && faceRow('Face point 1', 'Start facing point 1 (its back, when that move is reversed)')}
           <span className="hint">
             Where the path starts. The robot drives to the points after it.
             {auton?.first ? ' The auton sets its pose here.' : path.resetPose ? ' The path sets the pose here.' : ''}
@@ -189,9 +206,14 @@ export function Inspector({
         <div className="heading-row">
           <Toggle checked={heading} title="Heading (off = moveToPoint)"
             onChange={on => update(updatePoint(path, i, { theta: on ? 0 : null }))} />
-          <NumberField label="Heading" suffix="°" step={5} value={point.theta} disabled={!heading} placeholder="—"
-            title="0 faces red, clockwise" onChange={v => v != null && set({ theta: wrapDeg(v) }, 'theta')} />
+          <NumberField label="Heading" suffix="°" step={5} value={shown} disabled={!heading || faced} placeholder="—"
+            title={faced ? `Facing point ${i + 1}` : '0 faces red, clockwise'} onChange={v => v != null && set({ theta: wrapDeg(v) }, 'theta')} />
         </div>
+        {heading && faceRow(`Face the next point (${i + 1})`, action === 'pose'
+          ? 'chassis.moveToPose arriving facing the next point (its back, when that move is reversed)'
+          : action === 'turn'
+            ? 'chassis.turnToPoint toward the next point (its back, when that move is reversed)'
+            : 'Donut until the robot faces the next point (its back, when that move is reversed)')}
         {heading && (
           <Segmented label="At the heading" value={action} options={atGoal ? ACTIONS : ACTIONS.filter(a => a.value !== 'donut')}
             onChange={v => update(updatePoint(path, i, { action: v === 'pose' ? null : v }))} />

@@ -174,6 +174,60 @@ describe('code', () => {
     expect(code.match(/setPoseFromGoal/g)).toHaveLength(1);
   });
 
+  describe('facing the next point', () => {
+    it('turns toward it with turnToPoint (its back when the next move reverses)', () => {
+      const p = path([
+        { x: 18, y: 72, theta: 0 },
+        { x: 48, y: 72, theta: 0, action: 'turn', faceNext: true },
+        { x: 48, y: 100 },
+      ]);
+      expect(arrivals(p, opts)[1].final).toBeCloseTo(-90);
+      expect(pathCode('p', p, opts)).toContain('    chassis.moveToPoint(48, 72, 2000);\n    chassis.turnToPoint(48, 100, 1000); // facing point 2');
+      const back = { ...p, points: p.points.map((q, i) => (i === 2 ? { ...q, params: { reverse: true } } : q)) };
+      expect(arrivals(back, opts)[1].final).toBeCloseTo(90);
+      expect(pathCode('p', back, opts)).toContain('chassis.turnToPoint(48, 100, 1000, {.forwards = false}); // facing point 2');
+    });
+
+    it('arrives facing it with moveToPose', () => {
+      const p = path([{ x: 18, y: 72, theta: 0 }, { x: 48, y: 72, theta: 0, faceNext: true }, { x: 48, y: 100 }]);
+      expect(pathCode('p', p, opts)).toContain('    chassis.moveToPose(48, 72, -90, 2000); // facing point 2');
+    });
+
+    it('donuts round the goal until it faces it', () => {
+      const p = path([
+        { x: 24, y: 80 },
+        { x: 24, y: 48, target: 'goal-blue-2', theta: 180, action: 'donut', faceNext: true, params: { reverse: true } },
+        { x: 60, y: 48 },
+      ]);
+      const a = arrivals(p, opts)[1];
+      // facing (60, 48) from anywhere on the orbit = facing it from the goal: heading 0
+      expect(a.final).toBeCloseTo(0);
+      expect(a.donut!.x).toBeCloseTo(31.5);
+      expect(a.donut!.y).toBeCloseTo(48);
+      expect(pathCode('p', p, opts)).toContain('    chassis.donut(0, 1000, {.forwards = false}); // facing point 2');
+    });
+
+    it('starts facing point 1, and does nothing on the last point', () => {
+      const p = path([{ x: 18, y: 72, theta: 90, faceNext: true }, { x: 48, y: 100, theta: 45, action: 'turn', faceNext: true }]);
+      const code = autonCode('A', { steps: [{ path: 'p' }] }, { p }, opts);
+      expect(code).toContain('    chassis.setPose(18, 72, -43.03);');
+      expect(code).toContain('    chassis.turnToHeading(45, 1000);');
+    });
+
+    it('turns the ghost toward it', () => {
+      const def = path([
+        { x: 18, y: 72, theta: 0 },
+        { x: 48, y: 72, theta: 0, action: 'turn', faceNext: true },
+        { x: 48, y: 100 },
+      ]);
+      const ghost = simulateSteps([{ def }], CRIMSON_PROFILE.robot, 15);
+      expect(ghost.timeouts).toEqual([]);
+      // after the turn, before it drives on: facing +Y
+      const turned = ghost.poses.find(q => Math.abs(wrapDeg(q.theta + 90)) < 3 && Math.hypot(q.x - 48, q.y - 72) < 2);
+      expect(turned).toBeDefined();
+    });
+  });
+
   it("leaves crimson::DonutParams' default speeds out", () => {
     const p = path([{ x: 18, y: 72, theta: 0 }, { x: 24, y: 48, target: 'goal-blue-2', theta: 90, action: 'donut' }]);
     expect(pathCode('p', p, opts)).toContain('    chassis.donut(90, 1000);');
