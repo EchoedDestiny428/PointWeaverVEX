@@ -4,7 +4,7 @@ import type { Vec2 } from "../../core/geometry";
 import type { RobotConfig } from "../../robot/config";
 import { approach, integrate, speedFraction } from "../kinematics";
 import type { DriveState } from "../kinematics";
-import { LARGE_EXIT_RANGE, LargeExit } from "./types";
+import { HeldFor } from "./types";
 import type { Motion, MotionStatus } from "./types";
 
 export interface MoveToPointParams {
@@ -15,7 +15,6 @@ export interface MoveToPointParams {
 }
 
 const HEADING_GAIN = 6;
-const STOP_RANGE = 0.75;
 const NO_TURN_RANGE = 3;
 const PASSED_CHECK_RANGE = 8;
 
@@ -47,7 +46,8 @@ export class MoveToPoint implements Motion {
   traveled = 0;
   readonly keepsMoving: boolean;
   private startDirection: Vec2 | null = null;
-  private readonly largeExit = new LargeExit();
+  private readonly smallExit = new HeldFor();
+  private readonly largeExit = new HeldFor();
 
   constructor(
     readonly target: Vec2,
@@ -63,9 +63,13 @@ export class MoveToPoint implements Motion {
     if (!this.startDirection) {
       this.startDirection = remaining > 1e-6 ? scale(toTarget, 1 / remaining) : { x: 0, y: 1 };
     }
-    const exitRange = this.params.minSpeed > 0 ? Math.max(this.params.earlyExitRange, 1) : STOP_RANGE;
+    // motion chaining (minSpeed): done on entering the early exit range
+    if (this.params.minSpeed > 0 && remaining <= Math.max(this.params.earlyExitRange, 1)) return "done";
     const passed = remaining < PASSED_CHECK_RANGE && dot(toTarget, this.startDirection) <= 0;
-    if (remaining <= exitRange || passed || this.largeExit.update(remaining <= LARGE_EXIT_RANGE, dt)) {
+    // LemLib's exit conditions, with the robot's settings
+    const small = this.smallExit.update(remaining <= robot.linearSmallError, dt, robot.linearSmallTime);
+    const large = this.largeExit.update(remaining <= robot.linearLargeError, dt, robot.linearLargeTime);
+    if (passed || small || large) {
       return "done";
     }
     driveToward(state, this.target, dt, robot, this.params, remaining);

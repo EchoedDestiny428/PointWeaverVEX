@@ -14,8 +14,14 @@ interface Props {
   onOpenStep: (k: number) => void;
   hoverStep: number | null;
   onHoverStep: (k: number | null) => void;
-  /** new empty path, added to the end of this auton */
-  onNewPath: () => void;
+  /** new empty path, put into this auton at a position (the end without one) */
+  onNewPath: (at?: number) => void;
+  /** put a library path in at a position */
+  onInsert: (at: number, path: string) => void;
+  /** take the path at a position out */
+  onRemove: (at: number) => void;
+  /** move the path at `from` to `to` */
+  onMove: (from: number, to: number) => void;
   duration: number;
   /** steps with a move that timed out in the ghost */
   timeoutSteps: number[];
@@ -27,19 +33,14 @@ const fmt = (v: number) => (Math.round(v * 10) / 10).toString();
 
 /** An auton's paths in run order (drag to reorder), and the auton's own settings. */
 export function AutonPanel({
-  name, auton, paths, update, onOpenStep, hoverStep, onHoverStep, onNewPath, duration, timeoutSteps, offsets,
+  name, auton, paths, update, onOpenStep, hoverStep, onHoverStep, onNewPath, onInsert, onRemove, onMove, duration,
+  timeoutSteps, offsets,
 }: Props) {
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
   const steps = auton.steps;
 
   const setSteps = (next: AutonDefinition['steps']) => update({ ...auton, steps: next });
-  const move = (from: number, to: number) => {
-    const next = [...steps];
-    const [s] = next.splice(from, 1);
-    next.splice(to, 0, s);
-    setSteps(next);
-  };
   const endDrag = () => {
     setDragFrom(null);
     setDropAt(null);
@@ -48,17 +49,19 @@ export function AutonPanel({
   const first = steps[0] && paths[steps[0].path];
   const start = first?.points.length ? arrivals(stepView(first, steps[0]), offsets)[0] : null;
   const library = Object.keys(paths).sort((a, b) => a.localeCompare(b));
+  /** what can go in at a position: a new path, or one from the library */
+  const choices = (at: number) => [
+    { label: 'New path…', onSelect: () => onNewPath(at) },
+    ...(library.length ? [null] : []),
+    ...library.map(p => ({ label: p, onSelect: () => onInsert(at, p) })),
+  ];
 
   return (
     <>
       <div className="section-head">
         <span>Paths <b className="count">{steps.length}</b></span>
-        <MenuButton icon="plus" title="Add a path" empty="No paths yet"
-          items={[
-            { label: 'New path…', onSelect: onNewPath },
-            ...(library.length ? [null] : []),
-            ...library.map(p => ({ label: p, onSelect: () => setSteps([...steps, { path: p }]) })),
-          ]} />
+        <MenuButton icon="plus" title="Add a path at the end" heading="Add at the end" empty="No paths yet"
+          items={choices(steps.length)} />
       </div>
       <div className="list scroll points" onMouseLeave={() => onHoverStep(null)}>
         {steps.map((s, k) => {
@@ -86,7 +89,7 @@ export function AutonPanel({
               }}
               onDrop={e => {
                 e.preventDefault();
-                if (dragFrom !== null && dragFrom !== k) move(dragFrom, k);
+                if (dragFrom !== null && dragFrom !== k) onMove(dragFrom, k);
                 endDrag();
               }}
               onDragEnd={endDrag}
@@ -95,8 +98,9 @@ export function AutonPanel({
               <span className={`grow ellipsis ${def ? '' : 'missing'}`}>{s.path}</span>
               {warn && <span className="warn-dot" title={warn} />}
               <span className="row-actions" onClick={e => e.stopPropagation()}>
-                <IconButton icon="x" title="Take out of this auton (the path stays in the library)"
-                  onClick={() => setSteps(steps.filter((_, j) => j !== k))} />
+                <MenuButton icon="plus" title={`Insert a path after ${k + 1}`} heading={`Insert after ${k + 1}`}
+                  items={choices(k + 1)} />
+                <IconButton icon="x" title="Take out of this auton (the path stays in the library)" onClick={() => onRemove(k)} />
               </span>
               <span onClick={e => e.stopPropagation()}>
                 <IconButton icon="rotate" active={!!s.rotate}

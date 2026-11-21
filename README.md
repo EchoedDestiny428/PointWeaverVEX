@@ -37,7 +37,7 @@ The app isn't code-signed, so Windows may say *"Windows protected your PC"*. Cli
 
    **Face the next point** uses the direction to the next point instead of a number. Turn becomes `chassis.turnToPoint`, Donut donuts until the robot faces it, and Drive into arrives facing it. On point 0 it starts the robot facing point 1. When the next move is reversed, the robot's back faces it instead. The heading handle turns dashed; drag it to set your own heading again.
 6. **Slow down for the last** (a slider on the point, or drag the diamond on the field) drives the last part of a move at **Slow max**.
-7. Open the auton in the sidebar to see all of its paths. Add a path you already have with **+** in the auton's path list, or drag it in from **Paths** on the left. Click ↻ on a path to turn that use 180° about the field centre. The goals are placed point-symmetrically, so a move made on blue's half works the same way on red's half.
+7. Open the auton in the sidebar to see all of its paths. **+** at the top of its path list adds a path at the end, or drag one in from **Paths** on the left. Hover a path in the auton (in the sidebar or on the right) for **+**, which inserts a new or existing path right after it, and **×**, which takes it out of the auton (the path stays in the library). Drag rows on the right to reorder them. Click ↻ on a path to turn that use 180° about the field centre. The goals are placed point-symmetrically, so a move made on blue's half works the same way on red's half.
 8. Open **Output code** and click the copy button.
 
 Every path after the first starts by driving to its point 0, from wherever the path before it left the robot. That's a `moveToPoint` in `run()`, or a `moveToPose` if point 0 has a heading. It's skipped when the robot is already within 1 in, or when the path has **Set pose at start** on. Its timeout, speed and reverse are on point 0 of that path (open it from the auton).
@@ -65,6 +65,8 @@ Editing a path changes it in every auton that uses it, including the turned uses
 The toolbar shows the ghost's run time. It turns bold with a ⚠ when the run is over the limit (15 s, or 60 s with **Skills** on), or when a move hits its timeout. That point gets a dashed ring.
 
 **Robot** (bottom left) sets the ghost's size and speed, and the claw and goal offsets. Only the two offsets change the code.
+
+Its **Exit ranges** are LemLib's exit conditions, copied from `lemlib::ControllerSettings` in the robot's `robotconfig.cpp`. A move ends once it stays within 0.2 in for 100 ms, or within 1 in for 500 ms. A turn or donut ends within 1° for 50 ms, or within 3° for 300 ms. The ghost (and so the estimated timeouts) uses them; change them here when you retune the robot.
 
 ## Output code
 

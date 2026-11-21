@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AutonDefinition, Library, PathDefinition } from '../editor/types';
+import type { AutonDefinition, AutonStep, Library, PathDefinition } from '../editor/types';
 import { NAME_RE } from '../editor/types';
 import { rotate180 } from '../editor/pathOps';
 import { targetById } from '../editor/targets';
@@ -334,7 +334,54 @@ export function useLibrary() {
   };
 
   /** New empty path. With an auton, it's added to the end of it and opened there. */
-  const createPath = async (raw: string, addTo?: string | null) => {
+  // ---------- an auton's paths ----------
+
+  /**
+   * Change an auton's list of paths. `remap` says where each old position went (null: taken out), so a path that's
+   * open keeps being the same one: it follows a move, and closing a removed one goes back to the auton.
+   */
+  const editSteps = (auton: string, steps: AutonStep[], remap: (k: number) => number | null) => {
+    const a = libRef.current.autons[auton];
+    if (!a) return;
+    updateAuton(auton, { ...a, steps });
+    const f = focusRef.current;
+    if (f?.kind !== 'step' || f.auton !== auton) return;
+    const k = remap(f.step);
+    if (k == null) setFocus({ kind: 'auton', auton });
+    else if (k !== f.step) {
+      // same path, new position: keep the selection
+      focusRef.current = { ...f, step: k };
+      setFocusState(focusRef.current);
+      try {
+        localStorage.setItem(FOCUS_KEY, JSON.stringify(focusRef.current));
+      } catch { /* not important */ }
+    }
+  };
+
+  /** Put a path into an auton at a position (0 = first; past the end = last). */
+  const insertStep = (auton: string, at: number, path: string) => {
+    const steps = libRef.current.autons[auton]?.steps ?? [];
+    const i = Math.max(0, Math.min(steps.length, at));
+    editSteps(auton, [...steps.slice(0, i), { path }, ...steps.slice(i)], k => (k >= i ? k + 1 : k));
+  };
+
+  /** Take the path at a position out of an auton (the path stays in the library). */
+  const removeStep = (auton: string, at: number) => {
+    const steps = libRef.current.autons[auton]?.steps ?? [];
+    editSteps(auton, steps.filter((_, j) => j !== at), k => (k === at ? null : k > at ? k - 1 : k));
+  };
+
+  /** Move the path at `from` to `to`. */
+  const moveStep = (auton: string, from: number, to: number) => {
+    const steps = libRef.current.autons[auton]?.steps ?? [];
+    const order = steps.map((_, j) => j);
+    const [m] = order.splice(from, 1);
+    order.splice(to, 0, m);
+    editSteps(auton, order.map(j => steps[j]), k => order.indexOf(k));
+  };
+
+  /** New empty path. With an auton, it's put into it (at `at`, or at the end) and opened there. */
+  const createPath = async (raw: string, addTo?: string | null, at?: number | null) => {
     const name = validName('path', raw);
     if (!name) return false;
     const def: PathDefinition = { points: [], params: null };
@@ -342,8 +389,9 @@ export function useLibrary() {
     await flush(docKey('path', name));
     const auton = addTo ? libRef.current.autons[addTo] : undefined;
     if (addTo && auton) {
-      updateAuton(addTo, { ...auton, steps: [...auton.steps, { path: name }] });
-      setFocus({ kind: 'step', auton: addTo, step: auton.steps.length });
+      const i = Math.max(0, Math.min(auton.steps.length, at ?? auton.steps.length));
+      insertStep(addTo, i, name);
+      setFocus({ kind: 'step', auton: addTo, step: i });
     } else {
       setFocus({ kind: 'path', path: name });
     }
@@ -487,6 +535,9 @@ export function useLibrary() {
     redo: () => step('redo'),
     saveAll,
     createPath,
+    insertStep,
+    removeStep,
+    moveStep,
     createAuton,
     renamePath,
     renameAuton,

@@ -14,6 +14,16 @@ export const CRIMSON_PROFILE: TeamProfile = {
     clawOffset: 6.3, // 16 cm
     goalOffset: 7.5,
     timeoutLeeway: 100,
+    // lemlib::ControllerSettings in robotconfig.cpp (prelude-to-chaos): linear_controller(..., 0.2, 100, 1, 500, ...),
+    // angular_controller(..., 1, 50, 3, 300, ...)
+    linearSmallError: 0.2,
+    linearSmallTime: 100,
+    linearLargeError: 1,
+    linearLargeTime: 500,
+    angularSmallError: 1,
+    angularSmallTime: 50,
+    angularLargeError: 3,
+    angularLargeTime: 300,
   },
   chassisNames: ["chassis"],
   mechanismTimes: {

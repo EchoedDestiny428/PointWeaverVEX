@@ -430,6 +430,25 @@ describe('ghost', () => {
     expect(Math.hypot(end.x - done.x, end.y - done.y)).toBeLessThan(2);
   });
 
+  it("stops as tightly as the robot's LemLib exit ranges", () => {
+    const def = path([{ x: 18, y: 72, theta: 0 }, { x: 60, y: 72 }, { x: 60, y: 72, theta: 90, action: 'turn' }]);
+    const end = (r: typeof robot) => {
+      const g = simulateSteps([{ def: { ...def, points: def.points.slice(0, 2) } }], r, 15);
+      return poseAt(g, g.duration)!;
+    };
+    // robotconfig.cpp: within 0.2 in for 100 ms
+    const tight = end(robot);
+    expect(Math.hypot(tight.x - 60, tight.y - 72)).toBeLessThan(0.3);
+    // a loose small exit with no wait lets it stop further out
+    const loose = end({ ...robot, linearSmallError: 3, linearSmallTime: 0 });
+    expect(Math.hypot(loose.x - 60, loose.y - 72)).toBeGreaterThan(1);
+    // a turn settles inside 1 degree, without swinging past
+    const g = simulateSteps([{ def }], robot, 15);
+    const last = poseAt(g, g.duration)!;
+    expect(Math.abs(wrapDeg(last.theta - 90))).toBeLessThan(1);
+    expect(g.timeouts).toEqual([]);
+  });
+
   it("doesn't stall when a move ends a little beside its target", () => {
     // the slow part arrives at an angle and stops 0.8 in off; LemLib's large-error exit ends it
     const def = path([

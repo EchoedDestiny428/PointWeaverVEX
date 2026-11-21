@@ -17,9 +17,10 @@ interface Props {
   speedColors: boolean;
   onToggleSpeedColors: () => void;
   /** asks for a new path's name (adding it to an auton when given) */
-  onNewPath: (auton: string | null) => void;
+  /** a new path to name: in the library, or into an auton at a position (the end without one) */
+  onNewPath: (auton: string | null, at?: number) => void;
   /** set while a new path is being named, so the box shows in the right place */
-  naming: { auton: string | null } | null;
+  naming: { auton: string | null; at?: number } | null;
   onNamingDone: () => void;
 }
 
@@ -164,23 +165,43 @@ export function Sidebar({
                   <div className={`sub-list ${active || current === name ? 'selected' : ''}`}>
                     {auton.steps.map((s, k) => {
                       const on = focus?.kind === 'step' && focus.auton === name && focus.step === k;
+                      // a new path being named to go in right after this one
+                      const namingHere = naming?.auton === name && naming.at === k + 1 && k + 1 < auton.steps.length;
                       return (
-                        <div key={k} className={`sub-row ${on ? 'selected' : ''} ${paths[s.path] ? '' : 'missing'}`}
-                          title={paths[s.path] ? s.path : `"${s.path}" is missing`}
-                          onClick={() => paths[s.path] && lib.setFocus({ kind: 'step', auton: name, step: k })}>
-                          <span className="idx">{k + 1}</span>
-                          <span className="grow ellipsis">{s.path}</span>
-                          {s.rotate && <span className="rot" title="Turned 180°"><Icon name="rotate" size={12} /></span>}
-                        </div>
+                        <Fragment key={k}>
+                          <div className={`sub-row ${on ? 'selected' : ''} ${paths[s.path] ? '' : 'missing'}`}
+                            title={paths[s.path] ? s.path : `"${s.path}" is missing`}
+                            onClick={() => paths[s.path] && lib.setFocus({ kind: 'step', auton: name, step: k })}>
+                            <span className="idx">{k + 1}</span>
+                            <span className="grow ellipsis">{s.path}</span>
+                            {s.rotate && <span className="rot" title="Turned 180°"><Icon name="rotate" size={12} /></span>}
+                            <span className="row-actions" onClick={e => e.stopPropagation()}>
+                              <MenuButton icon="plus" title={`Insert a path after ${k + 1}`} heading={`Insert after ${k + 1}`}
+                                align="left" empty="No paths yet"
+                                items={[
+                                  { label: 'New path…', onSelect: () => onNewPath(name, k + 1) },
+                                  ...(pathNames.length ? [null] : []),
+                                  ...pathNames.map(p => ({ label: p, onSelect: () => lib.insertStep(name, k + 1, p) })),
+                                ]} />
+                              <IconButton icon="x" title="Take out of this auton (the path stays in the library)"
+                                onClick={() => lib.removeStep(name, k)} />
+                            </span>
+                          </div>
+                          {namingHere && (
+                            <div className="sub-row editing">
+                              <InlineInput initial="" placeholder="path name" onSubmit={v => lib.createPath(v, name, k + 1)} onDone={onNamingDone} />
+                            </div>
+                          )}
+                        </Fragment>
                       );
                     })}
-                    {naming?.auton === name ? (
+                    {naming?.auton === name && (naming.at == null || naming.at >= auton.steps.length) ? (
                       <div className="sub-row editing">
                         <InlineInput initial="" placeholder="path name" onSubmit={v => lib.createPath(v, name)} onDone={onNamingDone} />
                       </div>
                     ) : (
                       <div className="sub-row add">
-                        <MenuButton icon="plus" title="Add a path to this auton" empty="No paths yet"
+                        <MenuButton icon="plus" title="Add a path at the end of this auton" heading="Add at the end" align="left" empty="No paths yet"
                           items={[
                             { label: 'New path…', onSelect: () => onNewPath(name) },
                             ...(pathNames.length ? [null] : []),
@@ -276,7 +297,14 @@ function RobotSection({ robot, setRobot, open, onToggle }: {
   const short: Record<keyof RobotConfig, string> = {
     width: 'Width', length: 'Length', trackWidth: 'Track', maxSpeed: 'Speed', acceleration: 'Accel',
     maxTurnRate: 'Turn', turnAcceleration: 'Turn accel', clawOffset: 'Claw', goalOffset: 'Goal', timeoutLeeway: 'Leeway',
+    linearSmallError: 'Move small', linearSmallTime: 'for', linearLargeError: 'Move large', linearLargeTime: 'for',
+    angularSmallError: 'Turn small', angularSmallTime: 'for', angularLargeError: 'Turn large', angularLargeTime: 'for',
   };
+  const field = (f: (typeof ROBOT_FIELDS)[number]) => (
+    <NumberField key={f.key} label={short[f.key]} suffix={f.unit} step={f.step} value={robot[f.key]}
+      title={`${f.label} (${f.min}–${f.max} ${f.unit})`}
+      onChange={v => v != null && setRobot({ [f.key]: Math.max(f.min, Math.min(f.max, v)) })} />
+  );
   const changed = ROBOT_FIELDS.some(f => robot[f.key] !== d[f.key]);
   return (
     <>
@@ -284,11 +312,11 @@ function RobotSection({ robot, setRobot, open, onToggle }: {
       <div className={`drawer ${open ? 'open' : ''}`} inert={!open} aria-hidden={!open}>
         <div className="drawer-inner">
           <div className="grid-2 drawer-body">
-            {ROBOT_FIELDS.map(f => (
-              <NumberField key={f.key} label={short[f.key]} suffix={f.unit} step={f.step} value={robot[f.key]}
-                title={`${f.label} (${f.min}–${f.max} ${f.unit})`}
-                onChange={v => v != null && setRobot({ [f.key]: Math.max(f.min, Math.min(f.max, v)) })} />
-            ))}
+            {ROBOT_FIELDS.filter(f => !f.exit).map(field)}
+            <span className="drawer-label" title="lemlib::ControllerSettings in the robot's robotconfig.cpp: a move or turn is done once it stays within the small range for its time, or the large range for its time">
+              Exit ranges (robotconfig.cpp)
+            </span>
+            {ROBOT_FIELDS.filter(f => f.exit).map(field)}
           </div>
         </div>
       </div>

@@ -43,7 +43,8 @@ export default function App() {
   const [grid, setGrid] = useState(() => readPref(GRID, 'on', false));
   const [speedColors, setSpeedColors] = useState(() => readPref(SPEED, 'on', false));
   const [tab, setTab] = useState<Tab>(() => (readPref(TAB, 'code', false) ? 'code' : 'edit'));
-  const [naming, setNaming] = useState<{ auton: string | null } | null>(null);
+  // a new path being named: in the library, or going into an auton (at a position, or at the end)
+  const [naming, setNaming] = useState<{ auton: string | null; at?: number } | null>(null);
   const toggleGrid = () => setGrid(g => !g);
   const toggleSpeedColors = () => setSpeedColors(s => !s);
 
@@ -200,7 +201,7 @@ export default function App() {
     <div className={`app ${tab === 'code' ? 'code-open' : ''}`}>
       <Sidebar lib={lib} theme={theme} onToggleTheme={toggleTheme} grid={grid} onToggleGrid={toggleGrid}
         speedColors={speedColors} onToggleSpeedColors={toggleSpeedColors}
-        onNewPath={auton => setNaming({ auton })} naming={naming} onNamingDone={() => setNaming(null)} />
+        onNewPath={(auton, at) => setNaming({ auton, at })} naming={naming} onNamingDone={() => setNaming(null)} />
 
       <main className="stage">
         <FieldCanvas
@@ -282,7 +283,10 @@ export default function App() {
             onOpenStep={openStep}
             hoverStep={hoverStep}
             onHoverStep={setHoverStep}
-            onNewPath={() => setNaming({ auton: currentAutonName })}
+            onNewPath={at => setNaming({ auton: currentAutonName, at })}
+            onInsert={(at, p) => lib.insertStep(currentAutonName!, at, p)}
+            onRemove={k => lib.removeStep(currentAutonName!, k)}
+            onMove={(from, to) => lib.moveStep(currentAutonName!, from, to)}
             duration={ghost.duration}
             timeoutSteps={stepTimeouts}
             offsets={robot}

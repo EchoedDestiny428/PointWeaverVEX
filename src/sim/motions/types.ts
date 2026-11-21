@@ -11,8 +11,24 @@ export interface Motion {
 }
 
 /**
- * LemLib's "large error" exit: a move also ends once the robot has stayed close to the target for a while, even
- * if it never gets inside the tight stop range (it arrived at an angle and the target is now beside it).
+ * Turns plan their braking with this share of the turn acceleration, leaving room for the one-step lag of the
+ * simulation; braking on all of it overshoots by a couple of degrees and swings back.
+ */
+export const TURN_BRAKING_SHARE = 0.7;
+
+/** LemLib's ExitCondition: true once the error has stayed within its range for the given time, in a row. */
+export class HeldFor {
+  private elapsed = 0;
+
+  update(within: boolean, dt: number, ms: number): boolean {
+    this.elapsed = within ? this.elapsed + dt : 0;
+    return within && this.elapsed * 1000 >= ms - 1e-6;
+  }
+}
+
+/**
+ * A fallback for the simulator's own simplifications (not a LemLib setting): a moveToPose that has settled close
+ * by, facing the right way, but short of LemLib's ranges, ends after a while instead of waiting for its timeout.
  */
 export const LARGE_EXIT_RANGE = 3;
 export const LARGE_EXIT_SECONDS = 0.5;

@@ -5,6 +5,7 @@ import type { Vec2 } from "../../core/geometry";
 import type { RobotConfig } from "../../robot/config";
 import { approach, integrate, speedFraction } from "../kinematics";
 import type { DriveState } from "../kinematics";
+import { HeldFor, TURN_BRAKING_SHARE } from "./types";
 import type { Motion, MotionStatus } from "./types";
 
 export interface TurnParams {
@@ -15,13 +16,14 @@ export interface TurnParams {
 }
 
 const SETTLE_WINDOW = 10;
-const SETTLED_TURN_RATE = 60;
 
 export abstract class TurnMotion implements Motion {
   traveled = 0;
   readonly keepsMoving: boolean;
   private fixedDirection: TurnDirection | null = null;
   private settling = false;
+  private readonly smallExit = new HeldFor();
+  private readonly largeExit = new HeldFor();
 
   constructor(
     readonly timeoutMs: number,
@@ -48,14 +50,16 @@ export abstract class TurnMotion implements Motion {
       error = angleError(target, state.pose.theta, "auto");
     }
 
-    const exitRange = Math.max(this.params.earlyExitRange, 1);
-    if (Math.abs(error) <= exitRange && (this.keepsMoving || Math.abs(state.w) < SETTLED_TURN_RATE)) {
-      return "done";
-    }
+    // motion chaining (minSpeed): done on entering the early exit range
+    if (this.keepsMoving && Math.abs(error) <= Math.max(this.params.earlyExitRange, 1)) return "done";
+    // LemLib's exit conditions, with the robot's settings (the robot's donut uses the same angular ones)
+    const small = this.smallExit.update(Math.abs(error) <= robot.angularSmallError, dt, robot.angularSmallTime);
+    const large = this.largeExit.update(Math.abs(error) <= robot.angularLargeError, dt, robot.angularLargeTime);
+    if (small || large) return "done";
 
     const cap = robot.maxTurnRate * speedFraction(this.params.maxSpeed);
     const floor = robot.maxTurnRate * speedFraction(this.params.minSpeed);
-    const braking = Math.sqrt(2 * robot.turnAcceleration * Math.abs(error));
+    const braking = Math.sqrt(2 * TURN_BRAKING_SHARE * robot.turnAcceleration * Math.abs(error));
     const magnitude = Math.max(floor, Math.min(cap, braking));
     state.w = approach(state.w, Math.sign(error) * magnitude, robot.turnAcceleration * dt);
     this.rotate(state, dt, robot);
