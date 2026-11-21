@@ -101,6 +101,27 @@ describe('path operations', () => {
     expect(off.rest).toBeUndefined();
   });
 
+  it('moves the robot round the goal on a donut, and starts the next move from there', () => {
+    // backing into the goal from above: reset to (24, 55.5) facing +Y, goal behind; donut to heading 0 (+X)
+    const def = path([
+      { x: 24, y: 80 },
+      { x: 24, y: 48, target: 'goal-blue-2', theta: 0, action: 'donut', params: { reverse: true } },
+      { x: 60, y: 48 },
+    ]);
+    const arr = arrivals(def, opts);
+    expect(arr[1].rest!.y).toBeCloseTo(55.5);
+    // it orbits the goal: still 7.5 in from it, now on the +X side, having turned clockwise 90 degrees
+    expect(arr[1].donut!.pivot.x).toBeCloseTo(24);
+    expect(arr[1].donut!.pivot.y).toBeCloseTo(48);
+    expect(arr[1].donut!.x).toBeCloseTo(31.5);
+    expect(arr[1].donut!.y).toBeCloseTo(48);
+    expect(arr[1].donut!.sweep).toBeCloseTo(90);
+    // the next move heads off from the donut's end
+    expect(arr[2].theta).toBeCloseTo(0);
+    const code = pathCode('p', { ...def, points: def.points.map((q, i) => (i === 2 ? { ...q, params: { slowdown: 0.5 } } : q)) }, opts);
+    expect(code).toContain('    chassis.waitUntil(14.25);');
+  });
+
   it("measures the gap between steps from where a goal reset leaves the robot", () => {
     const paths = {
       a: path([{ x: 0, y: 48 }, { x: 24, y: 48, target: 'goal-blue-2' }]),
@@ -293,9 +314,11 @@ describe('ghost', () => {
     ]);
     const ghost = simulateSteps([{ def }], CRIMSON_PROFILE.robot, 15);
     const end = poseAt(ghost, ghost.duration)!;
-    // turned to the heading, still 7.5 in from the goal's centre
+    // turned to the heading, still 7.5 in from the goal's centre, where the editor says it ends up
     expect(Math.abs(wrapDeg(end.theta - 90))).toBeLessThan(5);
     expect(Math.hypot(end.x - 24, end.y - 48)).toBeCloseTo(7.5, 0);
+    const done = arrivals(def, robot)[1].donut!;
+    expect(Math.hypot(end.x - done.x, end.y - done.y)).toBeLessThan(2);
   });
 
   it("doesn't stall when a move ends a little beside its target", () => {

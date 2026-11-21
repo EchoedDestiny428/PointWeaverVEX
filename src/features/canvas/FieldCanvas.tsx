@@ -8,8 +8,8 @@ import type { RobotConfig } from '../../robot/config';
 import { poseAt, type GhostPose } from '../../editor/ghost';
 import { speedColor, speedStops } from '../../utils/speedColor';
 import {
-  arrivals, clampToField, headingVector, insertPoint, offsetPoints, removePoint, resolveParams, restOf, round1, updatePoint,
-  updatePointParams, wrapDeg, type Arrival, type PointStart,
+  actionOf, arrivals, clampToField, donutAt, headingVector, insertPoint, offsetPoints, removePoint, resolveParams, restOf,
+  round1, updatePoint, updatePointParams, wrapDeg, type Arrival, type PointStart,
 } from '../../editor/pathOps';
 import { TARGETS, targetById, type Target } from '../../editor/targets';
 import { drawField } from './fieldArt';
@@ -220,7 +220,8 @@ export function FieldCanvas(props: Props) {
 
   /**
    * The robot's centre along a path as screen points, with each goal reset as a jump: into the goal's centre, then
-   * (pen up) from where the reset puts it. Returns the polyline's points and the jumps (from, to).
+   * (pen up) from where the reset puts it, then round a donut's orbit. Returns the polyline's points and the jumps
+   * (from, to).
    */
   const traceOf = (arr: Arrival[]) => {
     const line: { x: number; y: number; move: boolean }[] = [];
@@ -232,6 +233,15 @@ export function FieldCanvas(props: Props) {
         const [rx, ry] = toScreen(a.rest.x, a.rest.y);
         jumps.push([[sx, sy], [rx, ry]]);
         line.push({ x: rx, y: ry, move: true });
+      }
+      if (a.donut) {
+        // the orbit, a few degrees a step
+        const n = Math.max(2, Math.ceil(Math.abs(a.donut.sweep) / 6));
+        for (let k = 1; k <= n; k++) {
+          const c = donutAt(a.donut, k / n);
+          const [cx, cy] = toScreen(c.x, c.y);
+          line.push({ x: cx, y: cy, move: false });
+        }
       }
     });
     return { line, jumps };
@@ -680,9 +690,11 @@ export function FieldCanvas(props: Props) {
     const p = path.points[d.index];
     const arrival = arrivalsOf(path)[d.index];
     if (!p || !arrival) return;
-    // where the robot ends up: against the goal after a reset, otherwise where it's sent
+    // where the robot ends up: against the goal after a reset, round the goal after a donut, otherwise where it's
+    // sent; facing the point's heading once it has turned (or donuted) to it
     const a = restOf(arrival);
-    const theta = arrival.rest ? arrival.theta : p.theta ?? arrival.theta;
+    const action = actionOf(p);
+    const theta = action === 'turn' || action === 'donut' ? p.theta! : arrival.theta;
     const { robot } = latest.current;
     const f = headingVector(theta);
     const side = { x: -f.y, y: f.x };

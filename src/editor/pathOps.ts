@@ -1,6 +1,7 @@
 import type { AutonDefinition, AutonStep, HeadingAction, MoveParams, PathDefinition, PathPoint } from './types';
 import { DEFAULTS, FIELD_SIZE } from './types';
 import { mirrorTarget, targetById } from './targets';
+import { angleError } from '../core/angle';
 
 export const round2 = (v: number) => Math.round(v * 100) / 100;
 /** Dragged points land on the nearest tenth of an inch. */
@@ -158,6 +159,12 @@ export interface Arrival {
    * the way it drove in. The next move starts here.
    */
   rest?: { x: number; y: number };
+  /**
+   * After a donut: the robot orbits the goal it's on (pivot, goalOffset from its centre) until it faces the
+   * point's heading, so it ends up somewhere else. `from` + `sweep` are the robot's headings over the orbit
+   * (clockwise positive), `reach` how far ahead of the centre the pivot is (negative: behind).
+   */
+  donut?: { x: number; y: number; pivot: { x: number; y: number }; from: number; sweep: number; reach: number };
 }
 
 /** The robot's claw and goal offsets (in), from the robot settings. */
@@ -167,7 +174,13 @@ export interface Offsets {
 }
 
 /** Where the robot is once it's done with a point (after any goal reset). */
-export const restOf = (a: Arrival) => a.rest ?? a;
+export const restOf = (a: Arrival) => a.donut ?? a.rest ?? a;
+
+/** The robot's centre partway (0-1) round a donut's orbit. */
+export function donutAt(d: NonNullable<Arrival['donut']>, f: number) {
+  const h = headingVector(d.from + d.sweep * f);
+  return { x: d.pivot.x - h.x * d.reach, y: d.pivot.y - h.y * d.reach };
+}
 
 /**
  * Where the robot's centre goes for each point, and which way it faces there. A goal point sends the centre to the
@@ -193,6 +206,16 @@ export function arrivals(def: PathDefinition, offsets: Offsets): Arrival[] {
         const f = headingVector(theta);
         const side = r.reverse ? 1 : -1;
         a.rest = { x: p.x + side * f.x * offsets.goalOffset, y: p.y + side * f.y * offsets.goalOffset };
+      }
+      if (i > 0 && actionOf(p) === 'donut' && offsets.goalOffset > 0) {
+        // what chassis.donut does: it spins around a point goalOffset ahead (behind when orbiting behind), which
+        // stays put, so the centre swings round it by however far the robot turns
+        const base = a.rest ?? a;
+        const reach = (r.donutBehind ? -1 : 1) * offsets.goalOffset;
+        const f = headingVector(theta);
+        const pivot = { x: base.x + f.x * reach, y: base.y + f.y * reach };
+        const donut = { x: 0, y: 0, pivot, from: theta, sweep: angleError(p.theta!, theta, r.turnDirection), reach };
+        a.donut = { ...donut, ...donutAt(donut, 1) };
       }
       out.push(a);
       return;
