@@ -142,7 +142,7 @@ describe('code', () => {
     { x: 48, y: 72, theta: null },
     { x: 48, y: 48, theta: -90, params: { reverse: true, maxSpeed: 90, earlyExitRange: 4 } },
     { x: 36, y: 40, theta: 180, action: 'turn', params: { turnTimeout: 800, turnDirection: 'cw' } },
-    { x: 48, y: 24, target: 'goal-blue-3', theta: 90, action: 'donut', params: { donutFast: 127, donutSlow: 30, reverse: true } },
+    { x: 48, y: 24, target: 'goal-blue-3', theta: 90, action: 'donut', params: { donutFast: 110, donutSlow: 40, reverse: true } },
   ], { params: { timeout: 1500 } });
 
   it('uses moveToPose for a heading and moveToPoint without one, and resets at a goal before a donut', () => {
@@ -158,7 +158,7 @@ describe('code', () => {
       '    chassis.moveToPoint(48, 24, 1500, {.forwards = false}); // blue goal 3',
       '    chassis.waitUntilDone();',
       '    chassis.setPoseFromGoal(48, 24, {.distance = 7.5});',
-      '    chassis.donut(90, 1000, {.forwards = false, .fastSpeed = 127, .slowSpeed = 30});',
+      '    chassis.donut(90, 1000, {.forwards = false, .fastSpeed = 110, .slowSpeed = 40});',
       '}',
       '',
     ].join('\n'));

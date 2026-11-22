@@ -11,7 +11,8 @@ export interface RobotConfig {
   /** robot centre to the centre of the goal it's on (in): where a goal reset puts the robot, and the donut's pivot */
   goalOffset: number;
   /**
-   * How fast a donut turns (deg/s) at the default fast 100 / slow 75; other speeds scale it by (fast + slow) / 175.
+   * How fast a donut turns (deg/s) at fast 100 / slow 75; other speeds scale it by (fast + slow) / 175. (A reference
+   * point only: the default donut is now 127 / 15, which turns at 142 / 175 of this.)
    * Measured, not worked out: the robot drags the goal and its wheels slide sideways, so it's far slower than a turn.
    */
   donutRate: number;

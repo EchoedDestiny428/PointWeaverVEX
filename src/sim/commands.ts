@@ -114,8 +114,9 @@ export const MOTION_COMMANDS: MotionCommand[] = [
       new Donut(args.number(0, "theta"), args.number(1, "timeout"), {
         direction: args.paramDirection("direction"),
         forwards: args.paramBool("forwards", true),
-        fastSpeed: args.paramNumber("fastSpeed", 100),
-        slowSpeed: args.paramNumber("slowSpeed", 75),
+        // The robot's DonutParams defaults (include/motion/chassis.hpp).
+        fastSpeed: args.paramNumber("fastSpeed", 127),
+        slowSpeed: args.paramNumber("slowSpeed", 15),
         earlyExitRange: args.paramNumber("earlyExitRange", 0),
       }),
   },

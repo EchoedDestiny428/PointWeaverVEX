@@ -101,7 +101,8 @@ export const DEFAULTS = {
   maxSpeed: 127,
   minSpeed: 0,
   earlyExitRange: 0,
-  donutFast: 100,
-  donutSlow: 75,
+  // Must match DonutParams in the robot's include/motion/chassis.hpp: speeds equal to these are left out of the code.
+  donutFast: 127,
+  donutSlow: 15, // tuned on the robot 2026-11-21 (donut-testing branch)
   slowSpeed: 50,
 } as const;
