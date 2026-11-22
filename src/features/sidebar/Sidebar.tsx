@@ -338,8 +338,8 @@ function RobotSection({ robot, setRobot, open, onToggle }: {
 }) {
   const d = CRIMSON_PROFILE.robot;
   const short: Record<keyof RobotConfig, string> = {
-    width: 'Width', length: 'Length', trackWidth: 'Track', maxSpeed: 'Speed', acceleration: 'Accel',
-    maxTurnRate: 'Turn', turnAcceleration: 'Turn accel', clawOffset: 'Claw', goalOffset: 'Goal', timeoutLeeway: 'Leeway', donutRate: 'Donut',
+    width: 'Width', length: 'Length', trackWidth: 'Track', maxSpeed: 'Speed', acceleration: 'Accel', deceleration: 'Braking',
+    maxTurnRate: 'Turn', turnAcceleration: 'Turn accel', clawOffset: 'Claw', goalOffset: 'Goal', timeoutLeeway: 'Leeway', donutRate: 'Donut', horizontalDrift: 'Drift',
     linearSmallError: 'Move small', linearSmallTime: 'for', linearLargeError: 'Move large', linearLargeTime: 'for',
     angularSmallError: 'Turn small', angularSmallTime: 'for', angularLargeError: 'Turn large', angularLargeTime: 'for',
   };

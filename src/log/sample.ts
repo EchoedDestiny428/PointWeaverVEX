@@ -168,6 +168,21 @@ class Sampler {
   }
 }
 
+/**
+ * The robot the sample log was made with (Crimson's numbers before the 2026-11-22 measurements), kept fixed so the
+ * synthetic log and the tests on it don't change when the profile is retuned.
+ */
+const SAMPLE_ROBOT = {
+  ...CRIMSON_PROFILE.robot,
+  trackWidth: 12.5,
+  maxSpeed: 55,
+  acceleration: 140,
+  deceleration: 140,
+  maxTurnRate: 360,
+  turnAcceleration: 1800,
+  horizontalDrift: 0,
+};
+
 function simulateRoutine(source: string, routine: string): { result: SimResult; calls: CallStmt[] } {
   const file = parseCpp(source);
   const run = file.functions.find((fn) => fn.name === routine) ?? file.functions.find((fn) => fn.name === "run") ?? file.functions[0];
@@ -176,7 +191,7 @@ function simulateRoutine(source: string, routine: string): { result: SimResult; 
   const result = simulate(body, {
     field: DEFAULT_FIELD,
     profile: CRIMSON_PROFILE,
-    robot: CRIMSON_PROFILE.robot,
+    robot: SAMPLE_ROBOT,
     mechanismOverrides: {},
     periodSeconds: AUTON_LENGTH,
     obstacles: DEFAULT_OBSTACLES,

@@ -14,7 +14,7 @@ import { buildObstacles, CollisionTracker } from "./collisions";
 import type { CollisionContext, CollisionEvent, ObstacleFilter } from "./collisions";
 import { findMotionCommand } from "./commands";
 import type { ArgReader, MotionCommand } from "./commands";
-import { approach, integrate } from "./kinematics";
+import { approach, approachSpeed, integrate } from "./kinematics";
 import type { DriveState } from "./kinematics";
 import type { Motion } from "./motions/types";
 
@@ -224,7 +224,7 @@ class Runtime {
       else if (active.elapsed * 1000 >= active.motion.timeoutMs - EPSILON) this.endMotion("timeout");
       return;
     }
-    this.state.v = approach(this.state.v, 0, robot.acceleration * dt);
+    this.state.v = approachSpeed(this.state.v, 0, robot, dt);
     this.state.w = approach(this.state.w, 0, robot.turnAcceleration * dt);
     integrate(this.state, dt);
   }

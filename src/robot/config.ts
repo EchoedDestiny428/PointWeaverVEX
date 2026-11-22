@@ -4,6 +4,8 @@ export interface RobotConfig {
   trackWidth: number;
   maxSpeed: number;
   acceleration: number;
+  /** how fast it slows down (in/s^2); 0 uses acceleration. Braking is gentler than launching on a robot that tips */
+  deceleration: number;
   maxTurnRate: number;
   turnAcceleration: number;
   /** robot centre to the claw's centre, forward (in) */
@@ -18,6 +20,12 @@ export interface RobotConfig {
   donutRate: number;
   /** ms added to every estimated timeout (after the extra quarter) */
   timeoutLeeway: number;
+  /**
+   * LemLib's horizontalDrift (lemlib::Drivetrain in the robot's robotconfig.cpp: 2 for omni wheels, 8 for traction).
+   * moveToPose caps its forward power on a curve to sqrt(horizontalDrift * radius * 9.8) out of 127, so a tight curve
+   * is driven slowly. 0 turns the cap off.
+   */
+  horizontalDrift: number;
   /**
    * LemLib's exit conditions (lemlib::ControllerSettings smallError / smallErrorTimeout / largeError /
    * largeErrorTimeout in the robot's robotconfig.cpp): a move or turn is done once its error has stayed within the
@@ -48,11 +56,13 @@ export const ROBOT_FIELDS: Array<{
   { key: "trackWidth", label: "Track width", unit: "in", min: 4, max: 24, step: 0.25 },
   { key: "maxSpeed", label: "Top speed", unit: "in/s", min: 10, max: 120, step: 1 },
   { key: "acceleration", label: "Acceleration", unit: "in/s²", min: 20, max: 600, step: 10 },
+  { key: "deceleration", label: "Braking (slowing down; 0 = same as acceleration)", unit: "in/s²", min: 0, max: 600, step: 5 },
   { key: "maxTurnRate", label: "Turn rate", unit: "°/s", min: 60, max: 1200, step: 10 },
   { key: "turnAcceleration", label: "Turn acceleration", unit: "°/s²", min: 200, max: 6000, step: 50 },
   { key: "clawOffset", label: "Claw offset (robot centre to claw centre)", unit: "in", min: 0, max: 15, step: 0.1 },
   { key: "goalOffset", label: "Goal offset (robot centre to the centre of the goal it's on)", unit: "in", min: 0, max: 15, step: 0.1 },
   { key: "timeoutLeeway", label: "Estimated timeout leeway (added to every estimate)", unit: "ms", min: 0, max: 3000, step: 50 },
+  { key: "horizontalDrift", label: "LemLib horizontalDrift (robotconfig.cpp): moveToPose slows on curves to sqrt(drift x radius x 9.8) / 127. 2 for omni wheels, 8 for traction, 0 off", unit: "", min: 0, max: 20, step: 0.5 },
   { key: "donutRate", label: "Donut turn rate at fast 100 / slow 75 (scales with fast + slow). Time a real donut: about 1 s for 90 deg is 100", unit: "°/s", min: 10, max: 720, step: 5 },
   { key: "linearSmallError", label: "Move small exit: within this far (linear_controller smallError)", unit: "in", min: 0.05, max: 6, step: 0.05, exit: true },
   { key: "linearSmallTime", label: "...for this long (linear_controller smallErrorTimeout)", unit: "ms", min: 0, max: 2000, step: 10, exit: true },

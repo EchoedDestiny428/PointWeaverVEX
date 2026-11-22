@@ -6,15 +6,19 @@ export const CRIMSON_PROFILE: TeamProfile = {
   robot: {
     width: 15,
     length: 15,
-    trackWidth: 12.5,
-    maxSpeed: 55,
-    acceleration: 140,
-    maxTurnRate: 360,
-    turnAcceleration: 1800,
+    // measured on the new bot (2026-11-22): top speed from the motors, acceleration from a launch (braking tipped
+    // the robot), turn rate from the IMU both ways; track width is robotconfig.cpp's kTrackWidthIn (28.5 cm)
+    trackWidth: 11.2,
+    maxSpeed: 63,
+    acceleration: 250,
+    deceleration: 84, // about 0.75 s from top speed to a stop (the team's estimate, 2026-11-23; braking harder tips the robot)
+    maxTurnRate: 660,
+    turnAcceleration: 1950,
     clawOffset: 6.3, // 16 cm
     goalOffset: 7.5,
     donutRate: 100, // measured: about 1 s for a 90 deg donut
     timeoutLeeway: 100,
+    horizontalDrift: 2, // robotconfig.cpp kHorizontalDrift (omni wheels)
     // lemlib::ControllerSettings in robotconfig.cpp (prelude-to-chaos): linear_controller(..., 0.2, 100, 1, 500, ...),
     // angular_controller(..., 1, 50, 3, 300, ...)
     linearSmallError: 0.2,

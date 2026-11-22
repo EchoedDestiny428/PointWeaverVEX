@@ -3,7 +3,7 @@ import type { TurnDirection } from "../../core/angle";
 import { add, forward, headingTo, rightOf, scale, sub } from "../../core/geometry";
 import type { Vec2 } from "../../core/geometry";
 import type { RobotConfig } from "../../robot/config";
-import { approach, integrate, speedFraction } from "../kinematics";
+import { approach, approachSpeed, integrate, speedFraction } from "../kinematics";
 import type { DriveState } from "../kinematics";
 import { HeldFor, TURN_BRAKING_SHARE } from "./types";
 import type { Motion, MotionStatus } from "./types";
@@ -35,7 +35,7 @@ export abstract class TurnMotion implements Motion {
   protected abstract targetHeading(state: DriveState): number;
 
   protected rotate(state: DriveState, dt: number, robot: RobotConfig): void {
-    state.v = approach(state.v, 0, robot.acceleration * dt);
+    state.v = approachSpeed(state.v, 0, robot, dt);
     integrate(state, dt);
   }
 
