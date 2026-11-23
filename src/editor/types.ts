@@ -44,6 +44,11 @@ export interface MoveParams {
   slowSpeed?: number | null;
   /** at a goal: chassis.setPoseFromGoal once there (unset = on) */
   goalReset?: boolean | null;
+  /**
+   * ms to wait (pros::delay) once this point is done: after its move, reset, turn or donut. On point 0 it's a wait
+   * before the path's first move (after the start's setPose), e.g. for a mechanism at the start.
+   */
+  wait?: number | null;
 }
 
 export interface PathPoint {

@@ -34,7 +34,7 @@ export type FrameMap = (p: Pose) => Pose;
 const identity: FrameMap = p => p;
 
 /** What a generated line does, so the ghost's timings can be matched back to it. */
-export type CallKind = 'pose' | 'move' | 'slow' | 'turn' | 'reset';
+export type CallKind = 'pose' | 'move' | 'slow' | 'turn' | 'reset' | 'wait';
 
 /** Ghost-measured timeouts (ms) for one path's calls, by estimateKey. */
 export type Estimates = ReadonlyMap<string, number>;
@@ -119,6 +119,9 @@ function pathLines(def: PathDefinition, step: number, opts: PathOpts): Line[] {
     const at = map(startOf(arr[0]));
     push(`chassis.setPose(${num(at.x)}, ${num(at.y)}, ${num(wrapDeg(at.theta))});`, 0, 'pose');
   }
+  // a wait at the start: nothing is moving yet (a lead-in to point 0 already waited for itself)
+  const wait0 = pts.length ? resolveParams(def.params, pts[0].params).wait : 0;
+  if (wait0 > 0) push(`pros::delay(${num(wait0)});`, 0, 'wait');
 
   for (let i = 1; i < pts.length; i++) {
     const p = pts[i];
@@ -193,6 +196,12 @@ function pathLines(def: PathDefinition, step: number, opts: PathOpts): Line[] {
         ['fastSpeed', r.donutFast !== DEFAULTS.donutFast ? num(r.donutFast) : null],
         ['slowSpeed', r.donutSlow !== DEFAULTS.donutSlow ? num(r.donutSlow) : null],
       ])});${a.faced ? ` // ${facing}` : ''}`, i, 'turn');
+    }
+
+    if (r.wait > 0) {
+      // the moves above run in the background: wait for them, then the flat delay
+      push('chassis.waitUntilDone();', i, 'wait');
+      push(`pros::delay(${num(r.wait)});`, i, 'wait');
     }
   }
   return lines;
@@ -271,6 +280,9 @@ function leadIn(from: Pose | null, view: PathDefinition, step: number, opts: Pat
       ])});`,
       source: { step, point: 0, call: 'reset' },
     });
+  } else if (r.wait > 0) {
+    // the path waits at point 0 once it's there
+    lines.push({ text: 'chassis.waitUntilDone();', source: { step, point: 0, call: 'wait' } });
   }
   return lines;
 }

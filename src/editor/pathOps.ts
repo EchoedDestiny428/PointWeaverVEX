@@ -137,6 +137,7 @@ export function resolveParams(path: MoveParams | null | undefined, point: MovePa
     slowdown: Math.max(0, Math.min(0.95, point?.slowdown ?? 0)),
     slowSpeed: point?.slowSpeed ?? DEFAULTS.slowSpeed,
     goalReset: point?.goalReset ?? true,
+    wait: Math.max(0, point?.wait ?? 0),
   };
 }
 

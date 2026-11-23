@@ -179,6 +179,9 @@ export function Inspector({
               <Toggle checked={backed} title="Goal behind the robot (off: in front)" onChange={setBacked} />
             </div>
           )}
+          <NumberField label="Wait at the start" suffix="ms" step={100} nullable value={start.wait} placeholder="none"
+            title="pros::delay(ms) before the path's first move (after the start's setPose), e.g. for a spin at the start"
+            onChange={v => update(updatePointParams(path, 0, { wait: positive(v) || null }), 'pt-0-wait')} />
           <span className="hint">
             Where the path starts. The robot drives to the points after it.
             {startAtGoal ? ` At a goal, the robot starts ${offsets.goalOffset} in from its centre, with the goal ${backed ? 'behind' : 'in front of'} it.` : ''}
@@ -279,6 +282,9 @@ export function Inspector({
           <span className="field-label">Reverse</span>
           <Toggle checked={r.reverse} title="Drive backwards" onChange={v => setParam({ reverse: v ? true : null }, 'reverse')} />
         </div>
+        <NumberField label="Wait after" suffix="ms" step={100} nullable value={ov.wait} placeholder="none"
+          title="Once this point is done (move, reset, turn or donut): chassis.waitUntilDone(), then pros::delay(ms)"
+          onChange={v => setParam({ wait: positive(v) || null }, 'wait')} />
         <div className="field" title="For the last part of the move, a lower max speed: the code waits until that far in, cancels the move and drives the rest slower. Drag the diamond on the field too.">
           <span className="field-label">Slow down for the last</span>
           <div className="event-slider">
