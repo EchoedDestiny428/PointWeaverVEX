@@ -92,7 +92,7 @@ export interface Library {
 }
 
 export const FIELD_SIZE = 144;
-export const NAME_RE = /^[A-Za-z0-9_\- ]+$/;
+export { NAME_RE } from './names';
 
 /** What LemLib (and Crimson's donut) use when nothing is set. */
 export const DEFAULTS = {

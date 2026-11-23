@@ -5,6 +5,7 @@ import { ROBOT_FIELDS, type RobotConfig } from '../../robot/config';
 import { CRIMSON_PROFILE } from '../../profiles/crimson';
 import { store } from '../../editor/store';
 import { LOADERS, LOADER_NOMINAL, type LoaderOffsets } from '../../editor/targets';
+import { allFolders, buildTree, folderOf, leafOf, type FolderNode } from '../../editor/names';
 import { Icon, IconButton } from '../../components/Icon';
 import { NumberField } from '../../components/Controls';
 import { MenuButton } from '../../components/Menu';
@@ -52,6 +53,23 @@ function InlineInput({ initial, placeholder, onSubmit, onDone }: {
   );
 }
 
+const CLOSED_KEY = 'pw:closedFolders';
+const readClosed = (): Set<string> => {
+  try {
+    const v = JSON.parse(localStorage.getItem(CLOSED_KEY) ?? '[]');
+    return new Set(Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
+  } catch {
+    return new Set();
+  }
+};
+const saveClosed = (s: Set<string>) => {
+  try {
+    localStorage.setItem(CLOSED_KEY, JSON.stringify([...s]));
+  } catch { /* not important */ }
+};
+/** indent for a row at a folder depth (px) */
+const indent = (depth: number) => ({ paddingLeft: 8 + depth * 14 });
+
 const shortDir = (dir: string) => {
   const parts = dir.split(/[\\/]/).filter(Boolean);
   return parts.slice(-2).join('\\');
@@ -66,13 +84,33 @@ export function Sidebar({
   const [dropOn, setDropOn] = useState<string | null>(null);
   const [robotOpen, setRobotOpen] = useState(false);
   const [fieldOpen, setFieldOpen] = useState(false);
+  // path folders: which are folded (remembered), which is being renamed, which path waits for a new folder's name
+  const [closed, setClosedState] = useState<Set<string>>(readClosed);
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
+  const [newFolderFor, setNewFolderFor] = useState<string | null>(null);
+  const [dropFolder, setDropFolder] = useState<string | null>(null);
   const { focus, autons, paths } = lib;
+  const setClosed = (next: Set<string>) => {
+    setClosedState(next);
+    saveClosed(next);
+  };
 
   const current = lib.currentAutonName;
   // the open auton is always unfolded
   useEffect(() => {
     if (current && !expanded.has(current)) setExpanded(new Set(expanded).add(current));
   }, [current]);
+
+  // the open path's folders are unfolded
+  const openPath = focus?.kind === 'path' ? focus.path : null;
+  useEffect(() => {
+    if (!openPath) return;
+    const f = folderOf(openPath);
+    if (!f) return;
+    const parts = f.split('/');
+    const need = parts.map((_, i) => parts.slice(0, i + 1).join('/')).filter(p => closed.has(p));
+    if (need.length) setClosed(new Set([...closed].filter(p => !need.includes(p))));
+  }, [openPath]);
 
   const toggle = (name: string) => {
     const next = new Set(expanded);
@@ -93,6 +131,107 @@ export function Sidebar({
 
   const autonNames = Object.keys(autons).sort((a, b) => a.localeCompare(b));
   const pathNames = Object.keys(paths).sort((a, b) => a.localeCompare(b));
+  const tree = buildTree(pathNames);
+  const folders = allFolders(pathNames);
+
+  /** drop target for a dragged path: a folder row ('' = the Paths header, out of any folder) */
+  const folderDrop = (folder: string) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      setDropFolder(folder);
+    },
+    onDragLeave: () => setDropFolder(d => (d === folder ? null : d)),
+    onDrop: (e: React.DragEvent) => {
+      const path = e.dataTransfer.getData(DRAG_TYPE);
+      setDropFolder(null);
+      if (path) {
+        e.preventDefault();
+        lib.movePaths([path], folder);
+      }
+    },
+  });
+
+  const pathRow = (name: string, depth: number) => {
+    const active = focus?.kind === 'path' && focus.path === name;
+    const n = usage(name);
+    const here = folderOf(name);
+    if (renaming?.kind === 'path' && renaming.name === name) {
+      return (
+        <div key={name} className="list-row editing" style={indent(depth)}>
+          <InlineInput initial={name} onSubmit={v => lib.renamePath(name, v)} onDone={() => setRenaming(null)} />
+        </div>
+      );
+    }
+    if (newFolderFor === name) {
+      return (
+        <div key={name} className="list-row editing" style={indent(depth)}>
+          <InlineInput initial="" placeholder={`new folder for "${leafOf(name)}"`}
+            onSubmit={v => lib.movePaths([name], here ? `${here}/${v.trim()}` : v.trim())} onDone={() => setNewFolderFor(null)} />
+        </div>
+      );
+    }
+    return (
+      <div key={name} className={`list-row ${active ? 'selected' : ''}`} draggable style={indent(depth)}
+        title={`${name}\nDrag onto an auton to add it, or onto a folder to move it there`}
+        onDragStart={e => {
+          e.dataTransfer.setData(DRAG_TYPE, name);
+          e.dataTransfer.effectAllowed = 'copyMove';
+        }}
+        onClick={() => lib.setFocus({ kind: 'path', path: name })}
+        onDoubleClick={() => setRenaming({ kind: 'path', name })}>
+        <Icon name="route" size={14} />
+        <span className="grow ellipsis">{leafOf(name)}</span>
+        {n > 0 && <span className="uses" title={`Used ${n} time${n > 1 ? 's' : ''} in autons`}>{n}×</span>}
+        {lib.dirty.has(`path:${name}`) && <span className="dirty-dot" title="Saving…" />}
+        <span className="row-actions" onClick={e => e.stopPropagation()}>
+          {current && <IconButton icon="addPath" title={`Add to ${current}`} onClick={() => addStep(current, name)} />}
+          <MenuButton icon="folder" title="Move to a folder" heading="Move to" align="left"
+            items={[
+              { label: here ? 'New folder in here…' : 'New folder…', onSelect: () => setNewFolderFor(name) },
+              ...(here ? [{ label: 'Out of folders', onSelect: () => lib.movePaths([name], '') }] : []),
+              ...(folders.filter(f => f !== here).length ? [null] : []),
+              ...folders.filter(f => f !== here).map(f => ({ label: f, onSelect: () => lib.movePaths([name], f) })),
+            ]} />
+          <IconButton icon="pencil" title="Rename (every auton follows; use a / for a folder)" onClick={() => setRenaming({ kind: 'path', name })} />
+          <IconButton icon="x" title="Delete path" onClick={() => lib.deletePath(name)} />
+        </span>
+      </div>
+    );
+  };
+
+  const folderRows = (node: FolderNode, depth: number): React.ReactNode[] => node.folders.flatMap(f => {
+    const open = !closed.has(f.path);
+    if (renamingFolder === f.path) {
+      return [
+        <div key={`folder:${f.path}`} className="list-row editing" style={indent(depth)}>
+          <InlineInput initial={f.path} onSubmit={v => lib.renameFolder(f.path, v)} onDone={() => setRenamingFolder(null)} />
+        </div>,
+      ];
+    }
+    return [
+      <div key={`folder:${f.path}`} className={['list-row folder-row', dropFolder === f.path && 'drop-into'].filter(Boolean).join(' ')}
+        style={indent(depth)} title={`${f.path}: ${f.count} path${f.count === 1 ? '' : 's'}. Drop a path here to move it in`}
+        onClick={() => {
+          const next = new Set(closed);
+          if (open) next.add(f.path);
+          else next.delete(f.path);
+          setClosed(next);
+        }}
+        onDoubleClick={() => setRenamingFolder(f.path)}
+        {...folderDrop(f.path)}>
+        <span className={`chevron ${open ? 'open' : ''}`}><Icon name="chevron" size={12} /></span>
+        <Icon name="folder" size={14} />
+        <span className="grow ellipsis">{f.name}</span>
+        <b className="count">{f.count}</b>
+        <span className="row-actions" onClick={e => e.stopPropagation()}>
+          <IconButton icon="pencil" title="Rename the folder (every path in it, and every auton, follows)" onClick={() => setRenamingFolder(f.path)} />
+        </span>
+      </div>,
+      ...(open ? [...folderRows(f, depth + 1), ...f.items.map(p => pathRow(p, depth + 1))] : []),
+    ];
+  });
 
   return (
     <aside className="panel left">
@@ -175,7 +314,9 @@ export function Sidebar({
                             title={paths[s.path] ? s.path : `"${s.path}" is missing`}
                             onClick={() => paths[s.path] && lib.setFocus({ kind: 'step', auton: name, step: k })}>
                             <span className="idx">{k + 1}</span>
-                            <span className="grow ellipsis">{s.path}</span>
+                            <span className="grow ellipsis">
+                              {folderOf(s.path) && <span className="faint">{folderOf(s.path)}/</span>}{leafOf(s.path)}
+                            </span>
                             {s.rotate && <span className="rot" title="Turned 180°"><Icon name="rotate" size={12} /></span>}
                             <span className="row-actions" onClick={e => e.stopPropagation()}>
                               <MenuButton icon="plus" title={`Insert a path after ${k + 1}`} heading={`Insert after ${k + 1}`}
@@ -225,42 +366,14 @@ export function Sidebar({
           {autonNames.length === 0 && !creatingAuton && <div className="empty">Make an auton with +</div>}
         </div>
 
-        <div className="section-head sub">
+        <div className={['section-head sub', dropFolder === '' && 'drop-into'].filter(Boolean).join(' ')}
+          title="Drop a path here to take it out of its folder" {...folderDrop('')}>
           <span>Paths <b className="count">{pathNames.length}</b></span>
-          <IconButton icon="plus" title="New path" onClick={() => onNewPath(null)} />
+          <IconButton icon="plus" title="New path (name it folder/name to put it in a folder)" onClick={() => onNewPath(null)} />
         </div>
         <div className="list">
-          {pathNames.map(name => {
-            const active = focus?.kind === 'path' && focus.path === name;
-            const n = usage(name);
-            if (renaming?.kind === 'path' && renaming.name === name) {
-              return (
-                <div key={name} className="list-row editing">
-                  <InlineInput initial={name} onSubmit={v => lib.renamePath(name, v)} onDone={() => setRenaming(null)} />
-                </div>
-              );
-            }
-            return (
-              <div key={name} className={`list-row ${active ? 'selected' : ''}`} draggable
-                title="Drag onto an auton to add it"
-                onDragStart={e => {
-                  e.dataTransfer.setData(DRAG_TYPE, name);
-                  e.dataTransfer.effectAllowed = 'copy';
-                }}
-                onClick={() => lib.setFocus({ kind: 'path', path: name })}
-                onDoubleClick={() => setRenaming({ kind: 'path', name })}>
-                <Icon name="route" size={14} />
-                <span className="grow ellipsis">{name}</span>
-                {n > 0 && <span className="uses" title={`Used ${n} time${n > 1 ? 's' : ''} in autons`}>{n}×</span>}
-                {lib.dirty.has(`path:${name}`) && <span className="dirty-dot" title="Saving…" />}
-                <span className="row-actions" onClick={e => e.stopPropagation()}>
-                  {current && <IconButton icon="addPath" title={`Add to ${current}`} onClick={() => addStep(current, name)} />}
-                  <IconButton icon="pencil" title="Rename (every auton follows)" onClick={() => setRenaming({ kind: 'path', name })} />
-                  <IconButton icon="x" title="Delete path" onClick={() => lib.deletePath(name)} />
-                </span>
-              </div>
-            );
-          })}
+          {folderRows(tree, 0)}
+          {tree.items.map(name => pathRow(name, 0))}
           {naming && naming.auton == null && (
             <div className="list-row editing">
               <InlineInput initial="" placeholder="path name" onSubmit={v => lib.createPath(v)} onDone={onNamingDone} />

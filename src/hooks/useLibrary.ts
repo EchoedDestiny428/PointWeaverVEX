@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AutonDefinition, AutonStep, Library, PathDefinition } from '../editor/types';
-import { NAME_RE } from '../editor/types';
+import { inFolder, normalizeName } from '../editor/names';
 import { rotate180, syncSpots } from '../editor/pathOps';
 import { setLoaderOffsets, targetById, type LoaderOffsets } from '../editor/targets';
 import { store, type DocKind, type Settings } from '../editor/store';
@@ -338,10 +338,17 @@ export function useLibrary() {
   // ---------- names ----------
 
   const validName = (kind: DocKind, raw: string, except?: string) => {
-    const name = raw.trim().replace(/\s+/g, ' ');
-    if (!name || name === except) return null;
-    if (!NAME_RE.test(name)) {
-      alert('Use letters, numbers, spaces, - or _');
+    if (!raw.trim()) return null;
+    const name = normalizeName(raw);
+    if (name === except) return null;
+    if (!name) {
+      alert(kind === 'path'
+        ? 'Use letters, numbers, spaces, - or _ (and / to put it in a folder, like "skills 148/start")'
+        : 'Use letters, numbers, spaces, - or _');
+      return null;
+    }
+    if (kind === 'auton' && name.includes('/')) {
+      alert('Folders are only for paths; use letters, numbers, spaces, - or _');
       return null;
     }
     const taken = kind === 'path' ? libRef.current.paths : libRef.current.autons;
@@ -454,6 +461,46 @@ export function useLibrary() {
     }
     const f = focusRef.current;
     if (f?.kind === 'path' && f.path === oldName) setFocus({ kind: 'path', path: name });
+  };
+
+  /**
+   * Moves paths into a folder ('' = out of any folder), keeping their own names; autons follow. Nothing moves if
+   * any of them would land on a name that's taken.
+   */
+  const movePaths = async (names: string[], folder: string) => {
+    const moves = names.map(n => [n, inFolder(folder, n)] as const).filter(([a, b]) => a !== b);
+    await renameMany(moves);
+  };
+
+  /** Renames a folder (or moves it into another: "a/b"): every path in it, and in its folders, follows. */
+  const renameFolder = async (oldFolder: string, raw: string) => {
+    const folder = normalizeName(raw);
+    if (!folder) {
+      if (raw.trim()) alert('Use letters, numbers, spaces, - or _ (and / for a folder in a folder)');
+      return;
+    }
+    if (folder === oldFolder) return;
+    if (folder.startsWith(`${oldFolder}/`)) {
+      alert("A folder can't go inside itself.");
+      return;
+    }
+    const moves = Object.keys(libRef.current.paths)
+      .filter(n => n.startsWith(`${oldFolder}/`))
+      .map(n => [n, folder + n.slice(oldFolder.length)] as const);
+    await renameMany(moves);
+  };
+
+  const renameMany = async (moves: (readonly [string, string])[]) => {
+    if (!moves.length) return;
+    const leaving = new Set(moves.map(([a]) => a.toLowerCase()));
+    const staying = Object.keys(libRef.current.paths).filter(n => !leaving.has(n.toLowerCase())).map(n => n.toLowerCase());
+    const arriving = moves.map(([, b]) => b.toLowerCase());
+    const clash = moves.find(([, b], i) => staying.includes(b.toLowerCase()) || arriving.indexOf(b.toLowerCase()) !== i);
+    if (clash) {
+      alert(`There's already a path called "${clash[1]}". Nothing was moved.`);
+      return;
+    }
+    for (const [from, to] of moves) await renamePath(from, to);
   };
 
   const renameAuton = async (oldName: string, raw: string) => {
@@ -572,6 +619,8 @@ export function useLibrary() {
     moveStep,
     createAuton,
     renamePath,
+    movePaths,
+    renameFolder,
     renameAuton,
     deletePath,
     deleteAuton,

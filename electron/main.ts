@@ -1,54 +1,23 @@
 import { app, BrowserWindow, clipboard, ipcMain, Menu, nativeTheme, shell } from "electron";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { deleteDoc, fileFor, readAll, renameDoc, writeJson } from "./docs.js";
 
 /*
  * Autons and paths live in Documents/PointWeaver, one JSON file each:
- *   paths/<name>.json    a path: points and LemLib settings
+ *   paths/<name>.json    a path: points and LemLib settings (a name like "a/b" is in the folder paths/a)
  *   autons/<name>.json   an auton: the paths it runs, in order
  *   settings.json        robot size and speed for the ghost, and the field's loader offsets
  */
 
-type Kind = "path" | "auton";
-
 const here = path.dirname(fileURLToPath(import.meta.url));
 const devServer = process.argv.includes("--dev") ? "http://localhost:5173" : null;
-const NAME_RE = /^[A-Za-z0-9_\- ]+$/;
-const FOLDERS: Record<Kind, string> = { path: "paths", auton: "autons" };
 
 let win: BrowserWindow | null = null;
 
 const storeDir = (): string => path.join(app.getPath("documents"), "PointWeaver");
-const folder = (kind: Kind): string => path.join(storeDir(), FOLDERS[kind]);
 const settingsFile = (): string => path.join(storeDir(), "settings.json");
-
-function fileFor(kind: unknown, name: unknown): string {
-  if (kind !== "path" && kind !== "auton") throw new Error(`Unknown kind: ${String(kind)}`);
-  if (typeof name !== "string" || !NAME_RE.test(name)) throw new Error(`Invalid name: ${String(name)}`);
-  return path.join(folder(kind), `${name}.json`);
-}
-
-const writeJson = (file: string, data: unknown): void => {
-  mkdirSync(path.dirname(file), { recursive: true });
-  writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
-};
-
-function readAll(kind: Kind, skipped: string[]): Record<string, unknown> {
-  const dir = folder(kind);
-  const out: Record<string, unknown> = {};
-  if (!existsSync(dir)) return out;
-  for (const file of readdirSync(dir).filter((f) => f.toLowerCase().endsWith(".json")).sort()) {
-    const name = file.slice(0, -5);
-    if (!NAME_RE.test(name)) continue;
-    try {
-      out[name] = JSON.parse(readFileSync(path.join(dir, file), "utf8"));
-    } catch (e) {
-      skipped.push(`${FOLDERS[kind]}/${file}: ${(e as Error).message}`);
-    }
-  }
-  return out;
-}
 
 /** Wrap a handler so it always resolves to its result or { error }. */
 function handle(channel: string, fn: (...args: unknown[]) => unknown): void {
@@ -63,8 +32,8 @@ function handle(channel: string, fn: (...args: unknown[]) => unknown): void {
 
 handle("store:load", () => {
   const skipped: string[] = [];
-  const paths = readAll("path", skipped);
-  const autons = readAll("auton", skipped);
+  const paths = readAll(storeDir(), "path", skipped);
+  const autons = readAll(storeDir(), "auton", skipped);
   let settings: unknown = null;
   if (existsSync(settingsFile())) {
     try {
@@ -76,19 +45,11 @@ handle("store:load", () => {
   return { dir: storeDir(), paths, autons, settings, skipped };
 });
 
-handle("store:write", (kind, name, data) => writeJson(fileFor(kind, name), data));
+handle("store:write", (kind, name, data) => writeJson(fileFor(storeDir(), kind, name), data));
 
-handle("store:delete", (kind, name) => {
-  const file = fileFor(kind, name);
-  if (existsSync(file)) unlinkSync(file);
-});
+handle("store:delete", (kind, name) => deleteDoc(storeDir(), kind, name));
 
-handle("store:rename", (kind, from, to) => {
-  const src = fileFor(kind, from);
-  const dst = fileFor(kind, to);
-  if (existsSync(dst)) throw new Error("That name is already taken.");
-  if (existsSync(src)) renameSync(src, dst);
-});
+handle("store:rename", (kind, from, to) => renameDoc(storeDir(), kind, from, to));
 
 handle("store:writeSettings", (data) => writeJson(settingsFile(), data));
 
@@ -111,7 +72,7 @@ ipcMain.on("store:flushSync", (event, writes: unknown) => {
   try {
     if (Array.isArray(writes)) {
       for (const w of writes as Array<{ kind: unknown; name: unknown; data: unknown }>) {
-        writeJson(fileFor(w.kind, w.name), w.data);
+        writeJson(fileFor(storeDir(), w.kind, w.name), w.data);
       }
     }
     event.returnValue = true;

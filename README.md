@@ -41,6 +41,8 @@ The app isn't code-signed, so Windows may say *"Windows protected your PC"*. Cli
 7. Open the auton in the sidebar to see all of its paths. **+** at the top of its path list adds a path at the end, or drag one in from **Paths** on the left. Hover a path in the auton (in the sidebar or on the right) for **+**, which inserts a new or existing path right after it, and **×**, which takes it out of the auton (the path stays in the library). Drag rows on the right to reorder them. Click ↻ on a path to turn that use 180° about the field centre. The goals are placed point-symmetrically, so a move made on blue's half works the same way on red's half.
 8. Open **Output code** and click the copy button.
 
+**Folders:** a path named `skills 148/start` is the path `start` in the folder `skills 148`, so two paths can share a name in different folders. In the sidebar, folders fold open and closed (it remembers which), and show how many paths they hold. To put a path in a folder, drag it onto the folder, use its folder button (**Move to**: a folder, a new one, or out of folders), or rename it with a `/`. Drag a path onto the **Paths** heading to take it out of its folder. Double-click a folder (or its pencil) to rename it: every path in it moves, and every auton follows. A folder disappears when its last path leaves.
+
 Every path after the first starts by driving to its point 0, from wherever the path before it left the robot. That's a `moveToPoint` in `run()`, or a `moveToPose` if point 0 has a heading. It's skipped when the robot is already within 1 in, or when the path has **Set pose at start** on. Its timeout, speed and reverse are on point 0 of that path (open it from the auton).
 
 Editing a path changes it in every auton that uses it, including the turned uses. You can edit a turned use where it sits on the field. The sidebar shows how many times each path is used.
@@ -123,7 +125,7 @@ Everything is plain JSON in `Documents\PointWeaver`. Click the folder button at 
 ```
 Documents\PointWeaver\
   autons\<name>.json   the paths an auton runs, in order: [{ "path": "corner rush", "rotate": true }, ...]
-  paths\<name>.json    a path's points and LemLib settings
+  paths\<name>.json    a path's points and LemLib settings (a path in a folder is paths\<folder>\<name>.json)
   settings.json        the ghost's robot size and speed, and this field's loader offsets
 ```
 
