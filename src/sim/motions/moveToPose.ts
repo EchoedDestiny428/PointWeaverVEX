@@ -1,11 +1,11 @@
 import { angleError } from "../../core/angle";
-import { dot, forward, length, scale, sub } from "../../core/geometry";
+import { dot, forward, headingTo, length, scale, sub } from "../../core/geometry";
 import type { Pose, Vec2 } from "../../core/geometry";
 import type { RobotConfig } from "../../robot/config";
-import { approach, approachSpeed, brakeRate, integrate, speedFraction } from "../kinematics";
+import { approach, approachSpeed, integrate, speedFraction } from "../kinematics";
 import type { DriveState } from "../kinematics";
-import { CLOSE_MIN_SPEED, CLOSE_RANGE, driveToward } from "./moveToPoint";
-import { HeldFor, LARGE_EXIT_RANGE, LargeExit, TURN_BRAKING_SHARE } from "./types";
+import { approachTarget, CLOSE_MIN_SPEED, CLOSE_RANGE, driveToward } from "./moveToPoint";
+import { Latched, TURN_BRAKING_SHARE } from "./types";
 import type { Motion, MotionStatus } from "./types";
 
 export interface MoveToPoseParams {
@@ -15,8 +15,6 @@ export interface MoveToPoseParams {
   minSpeed: number;
   earlyExitRange: number;
 }
-
-const HEADING_DONE = 2;
 
 /**
  * LemLib moveToPose's curve cap: the arc from the robot (along the way it's driving) to the carrot has radius
@@ -34,12 +32,23 @@ export function slipCap(pose: Pose, carrot: Vec2, robot: RobotConfig): number {
   return robot.maxSpeed * Math.min(1, Math.sqrt(drift * radius * 9.8) / 127);
 }
 
+/**
+ * LemLib 0.5.6's moveToPose: a boomerang toward a carrot point until CLOSE_RANGE, then settling on the pose. It's done
+ * once it's close, its lateral exits (distance along the heading) have both been met (the small one and the large
+ * one: at least largeErrorTimeout in range), and one of its angular exits has. Exits stay met once met. With a
+ * minSpeed it ends when the robot and the carrot are on different sides of the exit line, which happens as soon as
+ * it's close: the carrot jumps to the target there.
+ */
 export class MoveToPose implements Motion {
   traveled = 0;
   readonly keepsMoving: boolean;
-  private readonly smallExit = new HeldFor();
-  private readonly largeExit = new HeldFor();
-  private readonly fallback = new LargeExit();
+  readonly linear = true;
+  private readonly lateralSmall = new Latched();
+  private readonly lateralLarge = new Latched();
+  private readonly angularSmall = new Latched();
+  private readonly angularLarge = new Latched();
+  private lateralSettled = false;
+  private prevSameSide = false;
   private close = false;
   private maxSpeed: number;
   private prevOut = 0;
@@ -60,35 +69,44 @@ export class MoveToPose implements Motion {
       this.close = true;
       this.maxSpeed = Math.max(Math.abs(this.prevOut), CLOSE_MIN_SPEED);
     }
+    if (this.lateralLarge.done && this.lateralSmall.done) this.lateralSettled = true;
+    if (this.close && this.lateralSettled && (this.angularSmall.done || this.angularLarge.done)) return "done";
     const headingError = angleError(this.target.theta, state.pose.theta);
+    // the way it drives at the end, and the carrot it aims at (the target itself once close)
+    const travel = scale(forward(this.target.theta), this.params.forwards ? 1 : -1);
+    const carrot = this.close ? this.target : sub(this.target, scale(travel, this.params.lead * remaining));
 
-    if (this.keepsMoving && remaining <= Math.max(this.params.earlyExitRange, 1)) {
-      return "done";
+    // motion chaining: robot and carrot on different sides of the exit line (earlyExitRange short of the target)
+    if (this.keepsMoving) {
+      const before = (p: Vec2) => dot(sub(this.target, p), travel) <= Math.abs(this.params.earlyExitRange);
+      const sameSide = before(state.pose) === before(carrot);
+      if (!sameSide && this.prevSameSide && this.close) return "done";
+      this.prevSameSide = sameSide;
     }
-    // LemLib's exit conditions, with the robot's settings: in range and facing the heading, for long enough
-    const heading = Math.abs(headingError);
-    const small = this.smallExit.update(
-      remaining <= robot.linearSmallError && heading <= robot.angularSmallError, dt, robot.linearSmallTime);
-    const large = this.largeExit.update(
-      remaining <= robot.linearLargeError && heading <= robot.angularLargeError, dt, robot.linearLargeTime);
-    if (small || large) return "done";
-    // settled close by, facing the right way, but short of those ranges (the simulator's simplification)
-    if (this.fallback.update(remaining <= LARGE_EXIT_RANGE && heading <= HEADING_DONE * 1.5, dt)) {
-      return "done";
-    }
+
+    // LemLib's exit conditions, with the robot's settings. Lateral: the distance along the heading once close (far
+    // out it's the distance to the carrot, never in range). Angular: to the heading once close, to the carrot before.
+    const along = dot(sub(this.target, state.pose), forward(state.pose.theta));
+    const lateral = this.close ? Math.abs(along) : Infinity;
+    const aim = this.params.forwards ? state.pose.theta : state.pose.theta + 180;
+    const angular = Math.abs(this.close ? headingError : angleError(headingTo(state.pose, carrot), aim));
+    this.lateralSmall.update(lateral <= robot.linearSmallError, dt, robot.linearSmallTime);
+    this.lateralLarge.update(lateral <= robot.linearLargeError, dt, robot.linearLargeTime);
+    this.angularSmall.update(angular <= robot.angularSmallError, dt, robot.angularSmallTime);
+    this.angularLarge.update(angular <= robot.angularLargeError, dt, robot.angularLargeTime);
 
     if (!this.close) {
-      const side = this.params.forwards ? 1 : -1;
-      const lead = scale(forward(this.target.theta), side * this.params.lead * remaining);
-      const carrot = sub(this.target, lead);
       driveToward(state, carrot, dt, robot, { ...this.params, maxSpeed: this.maxSpeed }, remaining, slipCap(state.pose, carrot, robot));
     } else {
       // close: turn to the heading while closing the rest of the way along it (LemLib does both here)
       const cap = robot.maxTurnRate * speedFraction(this.maxSpeed);
       const braking = Math.sqrt(2 * TURN_BRAKING_SHARE * robot.turnAcceleration * Math.abs(headingError));
-      const along = dot(sub(this.target, state.pose), forward(state.pose.theta));
-      const reach = Math.min(robot.maxSpeed * speedFraction(this.maxSpeed), Math.sqrt(2 * brakeRate(robot) * Math.abs(along)));
-      state.v = approachSpeed(state.v, Math.sign(along) * reach, robot, dt);
+      let v = Math.sign(along) * approachTarget(robot, this.params.minSpeed, robot.maxSpeed * speedFraction(this.maxSpeed), Math.abs(along));
+      // LemLib's minSpeed floor, as in moveToPoint
+      const floor = robot.maxSpeed * speedFraction(this.params.minSpeed);
+      if (this.params.forwards && v > 0 && v < floor) v = floor;
+      if (!this.params.forwards && v < 0 && -v < floor) v = -floor;
+      state.v = approachSpeed(state.v, v, robot, dt);
       state.w = approach(state.w, Math.sign(headingError) * Math.min(cap, braking), robot.turnAcceleration * dt);
       integrate(state, dt);
     }

@@ -39,6 +39,23 @@ export interface RobotConfig {
   angularSmallTime: number;
   angularLargeError: number;
   angularLargeTime: number;
+  /**
+   * The lateral PID's kP (lemlib::ControllerSettings linear_controller in robotconfig.cpp): its output is kP x the
+   * distance left (out of 127), so a chained move (one with a minSpeed of its own) only slows from 127 / kP in out.
+   */
+  linearKP: number;
+  /**
+   * Early exits, written into the code so a stop doesn't wait out LemLib's exit conditions (the real robot rarely
+   * settles inside them, so every stop ran to its timeout). 0 turns that one off.
+   * exitMove: a move to a point, pin or loader ends this far (in) before it.
+   */
+  exitMove: number;
+  /** a move into a goal ends when the robot's centre is this far (in) from the goal's centre: goalOffset is touching */
+  exitGoal: number;
+  /** a turn ends this close (deg) to its heading */
+  exitTurn: number;
+  /** a donut ends this close (deg) to its heading */
+  exitDonut: number;
 }
 
 export const ROBOT_FIELDS: Array<{
@@ -50,6 +67,8 @@ export const ROBOT_FIELDS: Array<{
   step: number;
   /** LemLib exit ranges, shown together */
   exit?: boolean;
+  /** the code's early exits, shown together */
+  early?: boolean;
 }> = [
   { key: "width", label: "Width", unit: "in", min: 6, max: 24, step: 0.5 },
   { key: "length", label: "Length", unit: "in", min: 6, max: 24, step: 0.5 },
@@ -72,4 +91,9 @@ export const ROBOT_FIELDS: Array<{
   { key: "angularSmallTime", label: "...for this long (angular_controller smallErrorTimeout)", unit: "ms", min: 0, max: 2000, step: 10, exit: true },
   { key: "angularLargeError", label: "Turn large exit: within this many degrees (angular_controller largeError)", unit: "°", min: 0.1, max: 45, step: 0.5, exit: true },
   { key: "angularLargeTime", label: "...for this long (angular_controller largeErrorTimeout)", unit: "ms", min: 0, max: 5000, step: 50, exit: true },
+  { key: "linearKP", label: "Move kP (linear_controller kP): a chained move (its own minSpeed) slows down from 127 / kP in out", unit: "", min: 0.5, max: 60, step: 0.5, exit: true },
+  { key: "exitMove", label: "A stop at a point, pin or loader ends this far before it (minSpeed 1 + earlyExitRange; a straight moveToPose is written as a moveToPoint to end early). 0 waits for LemLib's exit", unit: "in", min: 0, max: 6, step: 0.25, early: true },
+  { key: "exitGoal", label: "A move into a goal ends when the robot's centre is this far from the goal's centre: more than the goal offset (touching), with room for the field. Up to the goal offset waits for the timeout", unit: "in", min: 0, max: 15, step: 0.25, early: true },
+  { key: "exitTurn", label: "A turn ends this close to its heading (minSpeed 1 + earlyExitRange). 0 waits for LemLib's exit", unit: "°", min: 0, max: 20, step: 0.5, early: true },
+  { key: "exitDonut", label: "A donut ends this close to its heading (earlyExitRange). 0 waits for LemLib's exit", unit: "°", min: 0, max: 30, step: 0.5, early: true },
 ];

@@ -14,8 +14,8 @@ import { AutonPanel } from './features/inspector/AutonPanel';
 import { CodeView } from './features/inspector/CodeView';
 import { Icon } from './components/Icon';
 import { appendPoint, movePoint, removePoints, rotate180, stepView } from './editor/pathOps';
-import { autonCode, pathCode, type SimStep } from './editor/codegen';
-import { estimatesFor, simulateSteps } from './editor/ghost';
+import { autonCode, exitsOf, pathCode, type SimStep } from './editor/codegen';
+import { estimatesFor, routeEstimates, simulateSteps } from './editor/ghost';
 import type { PathDefinition } from './editor/types';
 
 const GRID = 'pw:grid';
@@ -94,12 +94,17 @@ export default function App() {
   }, [focusKey]);
 
   const robot = lib.robot;
+  // an auton's timeouts come from the ghost driving the whole auton (a path can start with the robot still rolling)
+  const autonEstimates = useMemo(
+    () => (currentAuton ? routeEstimates(currentAuton.steps.map(s => ({ def: paths[s.path] ?? EMPTY, rotate: s.rotate })), robot) : null),
+    [currentAuton, paths, robot],
+  );
   const code = useMemo(() => {
-    const opts = { clawOffset: robot.clawOffset, goalOffset: robot.goalOffset, estimates: (def: PathDefinition) => estimatesFor(def, robot) };
-    if (currentAutonName && currentAuton) return autonCode(currentAutonName, currentAuton, paths, opts);
+    const opts = { clawOffset: robot.clawOffset, goalOffset: robot.goalOffset, exits: exitsOf(robot), estimates: (def: PathDefinition) => estimatesFor(def, robot) };
+    if (currentAutonName && currentAuton) return autonCode(currentAutonName, currentAuton, paths, { ...opts, estimates: autonEstimates ?? opts.estimates });
     if (currentPathName && paths[currentPathName]) return pathCode(currentPathName, paths[currentPathName], opts);
     return '';
-  }, [currentAutonName, currentAuton, currentPathName, paths, robot]);
+  }, [currentAutonName, currentAuton, currentPathName, paths, robot, autonEstimates]);
   // the ghost's suggested timeouts for the open path (the same for a turned use)
   const estimates = useMemo(() => estimatesFor(editing ? path : EMPTY, robot), [editing, path, robot]);
 
@@ -316,6 +321,7 @@ export default function App() {
               duration={ghost.duration}
               estimates={estimates}
               offsets={robot}
+              exits={exitsOf(robot)}
               auton={focus?.kind === 'step' && currentAutonName
                 ? { name: currentAutonName, rotated, first: focus.step === 0, onRotate: setStepRotate }
                 : null}

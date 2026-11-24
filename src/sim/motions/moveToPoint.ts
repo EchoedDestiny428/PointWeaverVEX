@@ -23,6 +23,16 @@ const NO_TURN_RANGE = 3;
 export const CLOSE_RANGE = 7.5;
 export const CLOSE_MIN_SPEED = 60;
 
+/**
+ * How fast (in/s) LemLib drives a move with `remaining` in to go, before its floor. A chained move (a minSpeed of its
+ * own, more than the early exit's 1) follows the lateral PID: kP x the distance, out of 127, so it only slows from
+ * 127 / kP in out (and its braking can't keep up). A stop follows the ideal braking curve the ghost is tuned on.
+ */
+export function approachTarget(robot: RobotConfig, minSpeed: number, cap: number, remaining: number): number {
+  if (minSpeed > 1) return Math.min(cap, robot.maxSpeed * Math.min(1, ((robot.linearKP ?? 9.5) * remaining) / 127));
+  return Math.min(cap, Math.sqrt(2 * brakeRate(robot) * remaining));
+}
+
 export function driveToward(
   state: DriveState,
   target: Vec2,
@@ -40,7 +50,8 @@ export function driveToward(
 
   const cap = Math.min(speedCap, robot.maxSpeed * speedFraction(params.maxSpeed));
   const floor = robot.maxSpeed * speedFraction(params.minSpeed);
-  const braking = params.minSpeed > 0 ? cap : Math.min(cap, Math.sqrt(2 * brakeRate(robot) * remaining));
+  // LemLib's PID slows every move down toward its target; a minSpeed only puts a floor under it (moveToPoint.cpp)
+  const braking = approachTarget(robot, params.minSpeed, cap, remaining);
   const alignment = Math.max(0, Math.cos(toRadians(error)));
   const magnitude = Math.max(floor, braking) * alignment;
 
@@ -58,6 +69,7 @@ export function driveToward(
 export class MoveToPoint implements Motion {
   traveled = 0;
   readonly keepsMoving: boolean;
+  readonly linear = true;
   private startDirection: Vec2 | null = null;
   private readonly smallExit = new HeldFor();
   private readonly largeExit = new HeldFor();
@@ -101,7 +113,7 @@ export class MoveToPoint implements Motion {
       driveToward(state, this.target, dt, robot, { ...this.params, maxSpeed: this.maxSpeed }, remaining);
     } else {
       const cap = robot.maxSpeed * speedFraction(this.maxSpeed);
-      let v = Math.sign(along) * Math.min(cap, Math.sqrt(2 * brakeRate(robot) * Math.abs(along)));
+      let v = Math.sign(along) * approachTarget(robot, this.params.minSpeed, cap, Math.abs(along));
       const floor = robot.maxSpeed * speedFraction(this.params.minSpeed);
       if (this.params.forwards && v > 0 && v < floor) v = floor;
       if (!this.params.forwards && v < 0 && -v < floor) v = -floor;

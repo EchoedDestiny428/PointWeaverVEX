@@ -7,6 +7,8 @@ import { mirrorTarget, targetById } from '../src/editor/targets';
 import type { AutonDefinition, PathDefinition } from '../src/editor/types';
 
 const robot = CRIMSON_PROFILE.robot;
+// no early exits: stops wait for LemLib's own exit conditions (tests/exits.test.ts has the early ones)
+const settled = { ...robot, exitMove: 0, exitGoal: 0, exitTurn: 0, exitDonut: 0 };
 const opts: CodeOptions = { clawOffset: 6.3, goalOffset: 7.5 };
 
 const path = (points: PathDefinition['points'], extra: Partial<PathDefinition> = {}): PathDefinition => ({
@@ -225,7 +227,7 @@ describe('code', () => {
         { x: 48, y: 72, theta: 0, action: 'turn', faceNext: true },
         { x: 48, y: 100 },
       ]);
-      const ghost = simulateSteps([{ def }], CRIMSON_PROFILE.robot, 15);
+      const ghost = simulateSteps([{ def }], settled, 15);
       expect(ghost.timeouts).toEqual([]);
       // after the turn, before it drives on: facing +Y
       const turned = ghost.poses.find(q => Math.abs(wrapDeg(q.theta + 90)) < 3 && Math.hypot(q.x - 48, q.y - 72) < 2);
@@ -496,13 +498,13 @@ describe('ghost', () => {
       return poseAt(g, g.duration)!;
     };
     // robotconfig.cpp: within 0.2 in for 100 ms
-    const tight = end(robot);
+    const tight = end(settled);
     expect(Math.hypot(tight.x - 60, tight.y - 72)).toBeLessThan(0.3);
     // a loose small exit with no wait lets it stop further out
-    const loose = end({ ...robot, linearSmallError: 3, linearSmallTime: 0 });
+    const loose = end({ ...settled, linearSmallError: 3, linearSmallTime: 0 });
     expect(Math.hypot(loose.x - 60, loose.y - 72)).toBeGreaterThan(1);
     // a turn settles inside 1 degree, without swinging past
-    const g = simulateSteps([{ def }], robot, 15);
+    const g = simulateSteps([{ def }], settled, 15);
     const last = poseAt(g, g.duration)!;
     expect(Math.abs(wrapDeg(last.theta - 90))).toBeLessThan(1);
     expect(g.timeouts).toEqual([]);
@@ -528,10 +530,9 @@ describe('ghost', () => {
     ]);
     const ghost = simulateSteps([{ def }], CRIMSON_PROFILE.robot, 15);
     expect(ghost.timeouts).toEqual([]);
-    // into the goal, then the reset puts it 7.5 in back out, on the side it came from
-    expect(ghost.jumps).toHaveLength(1);
-    const k = ghost.jumps[0];
-    expect(Math.hypot(ghost.poses[k - 1].x - 24, ghost.poses[k - 1].y - 48)).toBeLessThan(2);
+    // it stops against the goal (it can't get into it): the move ends half an inch out and it coasts in, so the
+    // reset finds it where it already is
+    for (const p of ghost.poses) expect(Math.hypot(p.x - 24, p.y - 48)).toBeGreaterThan(7.45);
     const rest = arrivals(def, robot)[2].rest!;
     const end = poseAt(ghost, ghost.duration)!;
     expect(Math.hypot(end.x - rest.x, end.y - rest.y)).toBeLessThan(1.5);

@@ -34,6 +34,14 @@ export abstract class TurnMotion implements Motion {
 
   protected abstract targetHeading(state: DriveState): number;
 
+  /**
+   * How close (deg) to the heading it ends early, or null for none. LemLib's turns only take an early exit with a
+   * minSpeed (on entering earlyExitRange, or crossing the heading, which a degree stands in for).
+   */
+  protected earlyExit(): number | null {
+    return this.keepsMoving ? Math.max(this.params.earlyExitRange, 1) : null;
+  }
+
   protected rotate(state: DriveState, dt: number, robot: RobotConfig): void {
     state.v = approachSpeed(state.v, 0, robot, dt);
     integrate(state, dt);
@@ -55,8 +63,9 @@ export abstract class TurnMotion implements Motion {
       error = angleError(target, state.pose.theta, "auto");
     }
 
-    // motion chaining (minSpeed): done on entering the early exit range
-    if (this.keepsMoving && Math.abs(error) <= Math.max(this.params.earlyExitRange, 1)) return "done";
+    // motion chaining: done on entering the early exit range
+    const early = this.earlyExit();
+    if (early != null && Math.abs(error) <= early) return "done";
     // LemLib's exit conditions, with the robot's settings (the robot's donut uses the same angular ones)
     const small = this.smallExit.update(Math.abs(error) <= robot.angularSmallError, dt, robot.angularSmallTime);
     const large = this.largeExit.update(Math.abs(error) <= robot.angularLargeError, dt, robot.angularLargeTime);
@@ -153,6 +162,11 @@ export class Donut extends TurnMotion {
 
   protected targetHeading(): number {
     return this.heading;
+  }
+
+  /** crimson::Chassis::donut ends on entering earlyExitRange whenever it's set (no minSpeed). */
+  protected override earlyExit(): number | null {
+    return this.donut.earlyExitRange > 0 ? this.donut.earlyExitRange : null;
   }
 
   /** The robot's measured donut rate, scaled by how hard the wheels are driven (fast + slow, 175 by default). */

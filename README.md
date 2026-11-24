@@ -69,7 +69,17 @@ The toolbar shows the ghost's run time. It turns bold with a ⚠ when the run is
 
 **Robot** (bottom left) sets the ghost's size and speed, and the claw and goal offsets. Only the two offsets change the code. **Donut** is how fast a donut turns (100°/s, measured as about 1 s for 90°, at fast 100 / slow 75; other speeds scale with fast + slow). A donut drags the goal and slides the wheels sideways, so it's much slower than a turn.
 
-Its **Exit ranges** are LemLib's exit conditions, copied from `lemlib::ControllerSettings` in the robot's `robotconfig.cpp`. A move ends once it stays within 0.2 in for 100 ms, or within 1 in for 500 ms. A turn or donut ends within 1° for 50 ms, or within 3° for 300 ms. The ghost (and so the estimated timeouts) uses them; change them here when you retune the robot.
+Its **Exit ranges** are LemLib's exit conditions, copied from `lemlib::ControllerSettings` in the robot's `robotconfig.cpp`. A move ends once it stays within 0.2 in for 100 ms, or within 1 in for 500 ms. A turn or donut ends within 1° for 50 ms, or within 3° for 300 ms. A `moveToPose` needs both of the move's (so at least 500 ms) and one of the turn's. The ghost (and so the estimated timeouts) uses them; change them here when you retune the robot.
+
+**Early exits** (under **Robot**) are written into the code so a stop doesn't wait for those exit ranges. On the field the robot rarely settled inside them, so every stop ran to its timeout, and a move into a goal always does: it's aimed at the goal's centre, which the robot can't reach. The ghost stops against a goal the same way (7.5 in from its centre) and waits out the timeout when nothing ends the move. With early exits:
+
+- **Stop exit** (1 in): a move to a point, pin or loader ends 1 in before it (`.minSpeed = 1, .earlyExitRange = 1`) and coasts the rest. A `moveToPose` can't end early (with a `minSpeed` it leaves as soon as it's within 7.5 in), so one that drives straight (start, line and end heading within 5°) is written as the `moveToPoint` it amounts to; a curved one waits for LemLib.
+- **Goal exit** (9 in): a move into a goal ends when the robot's centre is 9 in from the goal's centre, 1.5 in before touching (the **Goal** offset, 7.5 in). It coasts in, and 100 ms later the pose is reset from the goal. Keep it well outside the goal offset, for goals a bit off their spots and odometry drift: if the robot stops against a goal before it crosses the line, the move waits out its timeout again. A move into a goal that starts inside the line pushes for 250 ms instead.
+- **Turn exit** (1°) and **Donut exit** (1.5°): they end this close to their heading.
+
+A point with its own **Min** speed keeps its motion chaining as set. A point's **Exit** (the Inspector shows the robot's as the empty box's hint) is where it ends instead; at a goal it's measured from the goal's centre and only counts outside the goal offset. 0 turns that kind of early exit off, points' own Exits too. A slowed last part starts at least 2 in before its exit, so it has a line to cross.
+
+**Move kP** is the lateral PID's kP from `robotconfig.cpp`: a chained move (its own **Min** speed) only starts slowing 127 / kP in from its target, so the ghost drives it that way.
 
 ## Output code
 
@@ -95,7 +105,7 @@ void run() {
 
 Settings that are left at LemLib's default stay out of the call. Each point can set **Timeout** (ms), **Exit** (`earlyExitRange`, in), **Max** and **Min** speed (0–127) and **Reverse** (`forwards = false`). Leave a box empty to use the path's default. Set the path's defaults with no point selected.
 
-**Timeouts are estimated.** A timeout box left empty (on the point and the path) shows a greyed number: the ghost's time for that call, plus a quarter, plus **Leeway** (under **Robot**, 100 ms to start with), rounded up to 50 ms. That's what the code uses. Type a number to override it.
+**Timeouts are estimated.** A timeout box left empty (on the point and the path) shows a greyed number: the ghost's time for that call, plus a quarter, plus **Leeway** (under **Robot**, 100 ms to start with), rounded up to 50 ms. That's what the code uses. Type a number to override it. In an auton's code a call gets the longest of its times over the whole auton (a path can start with the robot still rolling from the one before), never less than the greyed number.
 
 A goal, a pin and a slowdown look like this:
 

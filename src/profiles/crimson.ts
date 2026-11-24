@@ -29,6 +29,14 @@ export const CRIMSON_PROFILE: TeamProfile = {
     angularSmallTime: 50,
     angularLargeError: 3,
     angularLargeTime: 300,
+    linearKP: 9.5, // linear_controller(9.5, 0, 12, ...)
+    // early exits in the code (2026-11-24): on the field every stop ran to its timeout waiting for the exits above
+    exitMove: 1,
+    // 1.5 in before the robot touches the goal (goalOffset 7.5, confirmed by the team 2026-11-24) and it coasts the
+    // rest: room for a goal a bit off its spot and for odometry drift since the last reset
+    exitGoal: 9,
+    exitTurn: 1, // 2 and 3 were 0.3 s faster over skills-148, but left the claw up to 0.7 in to the side of a wall pin
+    exitDonut: 1.5,
   },
   chassisNames: ["chassis"],
   mechanismTimes: {

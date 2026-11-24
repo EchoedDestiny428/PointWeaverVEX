@@ -455,6 +455,7 @@ function RobotSection({ robot, setRobot, open, onToggle }: {
     maxTurnRate: 'Turn', turnAcceleration: 'Turn accel', clawOffset: 'Claw', goalOffset: 'Goal', timeoutLeeway: 'Leeway', donutRate: 'Donut', horizontalDrift: 'Drift',
     linearSmallError: 'Move small', linearSmallTime: 'for', linearLargeError: 'Move large', linearLargeTime: 'for',
     angularSmallError: 'Turn small', angularSmallTime: 'for', angularLargeError: 'Turn large', angularLargeTime: 'for',
+    linearKP: 'Move kP', exitMove: 'Stop exit', exitGoal: 'Goal exit', exitTurn: 'Turn exit', exitDonut: 'Donut exit',
   };
   const field = (f: (typeof ROBOT_FIELDS)[number]) => (
     <NumberField key={f.key} label={short[f.key]} suffix={f.unit} step={f.step} value={robot[f.key]}
@@ -468,11 +469,15 @@ function RobotSection({ robot, setRobot, open, onToggle }: {
       <div className={`drawer ${open ? 'open' : ''}`} inert={!open} aria-hidden={!open}>
         <div className="drawer-inner">
           <div className="grid-2 drawer-body">
-            {ROBOT_FIELDS.filter(f => !f.exit).map(field)}
+            {ROBOT_FIELDS.filter(f => !f.exit && !f.early).map(field)}
             <span className="drawer-label" title="lemlib::ControllerSettings in the robot's robotconfig.cpp: a move or turn is done once it stays within the small range for its time, or the large range for its time">
-              Exit ranges (robotconfig.cpp)
+              LemLib settings (robotconfig.cpp)
             </span>
             {ROBOT_FIELDS.filter(f => f.exit).map(field)}
+            <span className="drawer-label" title="Written into the code: a stop ends this close to where it's going instead of waiting for the exit ranges above (on the field the robot rarely settles inside them, so it waited out every timeout). 0 turns one off">
+              Early exits (in the code)
+            </span>
+            {ROBOT_FIELDS.filter(f => f.early).map(field)}
           </div>
         </div>
       </div>

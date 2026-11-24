@@ -6,7 +6,7 @@ import { NumberField, Segmented, Toggle } from '../../components/Controls';
 import {
   arrivals, removePoint, resolveParams, shownHeading, updatePathParams, updatePoint, updatePointParams, wrapDeg, type Offsets,
 } from '../../editor/pathOps';
-import { estimateKey, type Estimates } from '../../editor/codegen';
+import { estimateKey, type EarlyExits, type Estimates } from '../../editor/codegen';
 import { targetById } from '../../editor/targets';
 
 interface Props {
@@ -25,6 +25,8 @@ interface Props {
   estimates: Estimates;
   /** the robot's claw and goal offsets (where the robot ends up, so which way the next point is) */
   offsets: Offsets;
+  /** the robot's early exits (what an empty Exit box means) */
+  exits: EarlyExits;
 }
 
 const show = (v: number | null | undefined, fallback: number | string) => (v != null ? String(v) : String(fallback));
@@ -44,7 +46,7 @@ const DIRECTIONS: { value: TurnDirection; label: string; title: string }[] = [
 ];
 
 export function Inspector({
-  path, name, selectedIndex, selectionCount, onDeleteSelection, update, onSelect, duration, auton, estimates, offsets,
+  path, name, selectedIndex, selectionCount, onDeleteSelection, update, onSelect, duration, auton, estimates, offsets, exits,
 }: Props) {
   const point = selectedIndex != null ? path.points[selectedIndex] : null;
   const pp = path.params ?? {};
@@ -219,12 +221,20 @@ export function Inspector({
 
   const r = resolveParams(pp, point.params);
   const ov = point.params ?? {};
-  const isLast = i === path.points.length - 1;
   const heading = point.theta != null;
   const atGoal = spot?.kind === 'goal';
   // a donut orbits the goal the robot is on, so it's only offered there
   const action = point.action === 'donut' && !atGoal ? 'turn' : point.action ?? 'pose';
   const turns = heading && action !== 'pose';
+  // what an empty Exit box does: the robot's early exit (a point with its own minSpeed chains at its Exit)
+  const chained = r.minSpeed !== 0;
+  const robotExit = atGoal ? (exits.goal > offsets.goalOffset ? exits.goal : 0) : exits.move;
+  const exitShown = chained || !(robotExit > 0) ? 'off' : `${robotExit}${atGoal ? ' goal' : ''}`;
+  const exitHint = chained
+    ? "earlyExitRange for this point's own Min speed (motion chaining)"
+    : atGoal
+      ? "Ends when the robot's centre is this far from the goal's centre, then it coasts in (empty: the robot's Goal exit). More than the goal offset, or it waits for the timeout"
+      : "Ends this far before the point and coasts the rest (empty: the robot's Stop exit)";
   const est = (call: 'move' | 'slow' | 'turn') => estimates.get(estimateKey(i, call));
   const auto = (given: number | null | undefined, call: 'move' | 'slow' | 'turn', fallback: number) =>
     show(given, est(call) ?? fallback);
@@ -270,8 +280,8 @@ export function Inspector({
           <NumberField label="Timeout" suffix="ms" step={100} nullable value={ov.timeout}
             placeholder={auto(pp.timeout, 'move', DEFAULTS.timeout)} title={estHint('move')}
             onChange={v => setParam({ timeout: positive(v) }, 'timeout')} />
-          <NumberField label="Exit" suffix="in" nullable value={ov.earlyExitRange} disabled={isLast}
-            placeholder={isLast ? 'off' : show(pp.earlyExitRange, 'off')} title={isLast ? 'Last point always arrives' : 'Early exit range'}
+          <NumberField label="Exit" suffix="in" nullable value={ov.earlyExitRange}
+            placeholder={show(pp.earlyExitRange, exitShown)} title={exitHint}
             onChange={v => setParam({ earlyExitRange: positive(v) }, 'exit')} />
           <NumberField label="Max" suffix="/127" step={5} nullable value={ov.maxSpeed} placeholder={show(pp.maxSpeed, 127)}
             onChange={v => setParam({ maxSpeed: speed(v) }, 'max')} />

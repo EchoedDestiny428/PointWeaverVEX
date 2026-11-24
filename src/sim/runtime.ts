@@ -1,5 +1,5 @@
 import { toDegrees, toRadians, wrap180 } from "../core/angle";
-import { distance, robotBox } from "../core/geometry";
+import { distance, forward, robotBox } from "../core/geometry";
 import type { Pose } from "../core/geometry";
 import type { FieldDefinition } from "../field/types";
 import type { CallStmt, Diagnostic, LoopStmt, SourceRef, Stmt } from "../program/ast";
@@ -25,7 +25,19 @@ export interface SimSettings {
   mechanismOverrides: Record<string, number>;
   periodSeconds: number;
   obstacles: ObstacleFilter;
+  /**
+   * Discs the robot's centre can't enter (a goal: its centre, and goalOffset, how close the robot's centre gets when
+   * it's pressed against it). A move aimed inside stops at the edge, so it waits for its exit or its timeout like the
+   * real robot does, and it doesn't count the distance it didn't drive.
+   */
+  goalStops?: GoalStop[];
   dt?: number;
+}
+
+export interface GoalStop {
+  x: number;
+  y: number;
+  radius: number;
 }
 
 export type EntryKind = "motion" | "mechanism" | "wait" | "pose" | "instant" | "group" | "loop";
@@ -216,9 +228,13 @@ class Runtime {
 
   stepMotion(dt: number): void {
     const robot = this.settings.robot;
+    const before = { x: this.state.pose.x, y: this.state.pose.y };
     if (this.active) {
       const active = this.active;
       const status = active.motion.step(this.state, dt, robot);
+      // odometry only counts what it really drove (a turn's traveled is degrees: left alone)
+      const lost = this.applyGoalStops(before);
+      if (active.motion.linear) active.motion.traveled = Math.max(0, active.motion.traveled - lost);
       active.elapsed += dt;
       if (status === "done") this.endMotion("done");
       else if (active.elapsed * 1000 >= active.motion.timeoutMs - EPSILON) this.endMotion("timeout");
@@ -227,6 +243,36 @@ class Runtime {
     this.state.v = approachSpeed(this.state.v, 0, robot, dt);
     this.state.w = approach(this.state.w, 0, robot.turnAcceleration * dt);
     integrate(this.state, dt);
+    this.applyGoalStops(before);
+  }
+
+  /**
+   * Keeps the robot's centre out of the goal stops: back to the edge, stopped when it drives into one, sliding along
+   * the edge when it only grazes it. Returns how much shorter (in) this step's drive was.
+   */
+  applyGoalStops(before: { x: number; y: number }): number {
+    const stops = this.settings.goalStops;
+    if (!stops?.length) return 0;
+    const pose = this.state.pose;
+    const wanted = distance(before, pose);
+    let stopped = false;
+    for (const stop of stops) {
+      const dx = pose.x - stop.x;
+      const dy = pose.y - stop.y;
+      const d = Math.hypot(dx, dy);
+      if (d >= stop.radius - 1e-9) continue;
+      // out along the line from the goal's centre (or, dead centre, back the way it was driving)
+      const f = forward(pose.theta);
+      const ux = d > 1e-9 ? dx / d : -Math.sign(this.state.v || 1) * f.x;
+      const uy = d > 1e-9 ? dy / d : -Math.sign(this.state.v || 1) * f.y;
+      pose.x = stop.x + ux * stop.radius;
+      pose.y = stop.y + uy * stop.radius;
+      // driving into it (more than 60 deg off sliding along it), it stops; just grazing it, it slides along
+      const inward = f.x * ux + f.y * uy;
+      if (this.state.v * inward < 0) this.state.v = Math.abs(inward) > 0.5 ? 0 : this.state.v * Math.sqrt(1 - inward * inward);
+      stopped = true;
+    }
+    return stopped ? Math.max(0, wanted - distance(before, pose)) : 0;
   }
 
   endMotion(status: EntryStatus): void {
@@ -452,7 +498,7 @@ function* runMotion(rt: Runtime, stmt: CallStmt, thread: string, command: Motion
 }
 
 export function simulate(statements: Stmt[], options: SimSettings): SimResult {
-  const settings: Required<SimSettings> = { dt: 0.01, ...options };
+  const settings: Required<SimSettings> = { dt: 0.01, ...options, goalStops: options.goalStops ?? [] };
   const { dt, robot, field } = settings;
   const rt = new Runtime(settings);
   rt.spawn("main", runList(rt, statements, "main"));

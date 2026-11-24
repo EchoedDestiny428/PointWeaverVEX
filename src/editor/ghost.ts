@@ -3,7 +3,8 @@ import { CRIMSON_PROFILE } from '../profiles/crimson';
 import type { RobotConfig } from '../robot/config';
 import { parseCpp, pickRoutine } from '../program/cppParser';
 import { simulate } from '../sim/runtime';
-import { estimateKey, flatProgram, type Estimates, type FrameMap, type LineSource, type Pose, type SimStep } from './codegen';
+import { estimateKey, exitsOf, flatProgram, type Estimates, type FrameMap, type LineSource, type Pose, type SimStep } from './codegen';
+import { TARGETS } from './targets';
 import type { PathDefinition } from './types';
 import { FIELD_SIZE } from './types';
 
@@ -39,6 +40,13 @@ export const EMPTY_GHOST: Ghost = { poses: [], jumps: [], duration: 0, timeouts:
 /** Every simulated frame is kept up to this rate; the drawn trail and playback don't need more. */
 const KEEP_EVERY_S = 0.02;
 
+/**
+ * The goals, in the simulator's frame, as places the robot's centre can't get closer to than goalOffset: a move
+ * aimed at a goal's centre stops against it there, like the real robot, and waits for its exit or its timeout.
+ */
+export const goalStops = (robot: RobotConfig) =>
+  TARGETS.filter(t => t.kind === 'goal').map(t => ({ ...toSimFrame({ x: t.x, y: t.y, theta: 0 }), radius: robot.goalOffset }));
+
 const run = (code: string, robot: RobotConfig, periodSeconds: number) => {
   const routine = pickRoutine(parseCpp(code));
   if (!routine) return null;
@@ -49,6 +57,7 @@ const run = (code: string, robot: RobotConfig, periodSeconds: number) => {
     mechanismOverrides: {},
     periodSeconds,
     obstacles: { walls: false, goals: false, loaders: false, elements: false },
+    goalStops: goalStops(robot),
   });
 };
 
@@ -68,7 +77,7 @@ export function estimatesFor(def: PathDefinition, robot: RobotConfig): Estimates
   const estimates = new Map<string, number>();
   if (def.points.length > 1) {
     const { code, sources } = flatProgram([{ def }], toSimFrame, {
-      clawOffset: robot.clawOffset, goalOffset: robot.goalOffset, measure: true,
+      clawOffset: robot.clawOffset, goalOffset: robot.goalOffset, exits: exitsOf(robot), measure: true,
     });
     const sim = run(code, robot, 300);
     for (const e of sim?.timeline ?? []) {
@@ -82,12 +91,47 @@ export function estimatesFor(def: PathDefinition, robot: RobotConfig): Estimates
   return estimates;
 }
 
+/**
+ * The estimates for the paths of a run (an auton) where it drives them: each call's ghost time over the whole run
+ * with long timeouts, the longest of all its uses, and never less than the path timed on its own. A path that starts
+ * right after an early exit starts with the robot still rolling, which the path timed alone from a standstill
+ * doesn't see. Lead-ins keep their own estimates.
+ */
+export function routeEstimates(steps: SimStep[], robot: RobotConfig): (def: PathDefinition) => Estimates {
+  const longest = new Map<PathDefinition, Map<string, number>>();
+  if (steps.length > 1 && steps.some(s => s.def.points.length > 1)) {
+    const { code, sources } = flatProgram(steps, toSimFrame, {
+      clawOffset: robot.clawOffset, goalOffset: robot.goalOffset, exits: exitsOf(robot), measure: true,
+    });
+    const sim = run(code, robot, 600);
+    for (const e of sim?.timeline ?? []) {
+      const src = sources.get(e.line);
+      if (e.kind !== 'motion' || !src || src.point === 0 || (e.status !== 'done' && e.status !== 'cancelled')) continue;
+      if (src.call !== 'move' && src.call !== 'slow' && src.call !== 'turn') continue;
+      const def = steps[src.step].def;
+      const calls = longest.get(def) ?? new Map<string, number>();
+      longest.set(def, calls);
+      const key = estimateKey(src.point, src.call);
+      calls.set(key, Math.max(calls.get(key) ?? 0, estimateFromSeconds(e.end - e.start, robot.timeoutLeeway)));
+    }
+  }
+  return def => {
+    const alone = estimatesFor(def, robot);
+    const inRun = longest.get(def);
+    if (!inRun) return alone;
+    const out = new Map(alone);
+    for (const [key, ms] of inRun) out.set(key, Math.max(out.get(key) ?? 0, ms));
+    return out;
+  };
+}
+
 export function simulateSteps(steps: SimStep[], robot: RobotConfig, periodSeconds: number): Ghost {
   if (!steps.some(s => s.def.points.length > 1)) return EMPTY_GHOST;
   const { code, sources } = flatProgram(steps, toSimFrame, {
     clawOffset: robot.clawOffset,
     goalOffset: robot.goalOffset,
-    estimates: def => estimatesFor(def, robot),
+    exits: exitsOf(robot),
+    estimates: routeEstimates(steps, robot),
   });
   // let it run past the time limit so the whole path shows; the toolbar says when it's over
   const sim = run(code, robot, Math.max(periodSeconds * 4, 120));

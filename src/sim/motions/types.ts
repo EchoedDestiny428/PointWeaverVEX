@@ -6,6 +6,8 @@ export type MotionStatus = "running" | "done";
 export interface Motion {
   readonly timeoutMs: number;
   readonly keepsMoving: boolean;
+  /** traveled is inches driven (a move), not degrees turned */
+  readonly linear?: boolean;
   traveled: number;
   step(state: DriveState, dt: number, robot: RobotConfig): MotionStatus;
 }
@@ -26,19 +28,15 @@ export class HeldFor {
   }
 }
 
-/**
- * A fallback for the simulator's own simplifications (not a LemLib setting): a moveToPose that has settled close
- * by, facing the right way, but short of LemLib's ranges, ends after a while instead of waiting for its timeout.
- */
-export const LARGE_EXIT_RANGE = 3;
-export const LARGE_EXIT_SECONDS = 0.5;
-
-export class LargeExit {
+/** LemLib's ExitCondition as the robot runs it: met once the error has stayed in range for the time, and met from then on. */
+export class Latched {
+  done = false;
   private elapsed = 0;
 
-  /** True once `close` has held for LARGE_EXIT_SECONDS in a row. */
-  update(close: boolean, dt: number): boolean {
-    this.elapsed = close ? this.elapsed + dt : 0;
-    return this.elapsed >= LARGE_EXIT_SECONDS - 1e-9;
+  update(within: boolean, dt: number, ms: number): boolean {
+    if (this.done) return true;
+    this.elapsed = within ? this.elapsed + dt : 0;
+    if (within && this.elapsed * 1000 >= ms - 1e-6) this.done = true;
+    return this.done;
   }
 }
