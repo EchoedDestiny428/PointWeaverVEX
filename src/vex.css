@@ -29,6 +29,41 @@
   padding-bottom: 4px;
 }
 
+/* the bottom sections never grow past the window: an open drawer that doesn't fit scrolls inside, so the Robot and
+   Field headers (and the buttons that close their drawers) stay on screen, and the lists keep a little room */
+.side-scroll {
+  min-height: 72px;
+}
+
+.panel-foot {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.panel-foot > .section-head {
+  flex: none;
+}
+
+.panel-foot > .drawer {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.drawer.open .drawer-inner {
+  overflow-y: auto;
+}
+
+.drawer-inner::-webkit-scrollbar {
+  width: 6px;
+}
+
+.drawer-inner::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 3px;
+}
+
 .chevron {
   width: 18px;
   height: 18px;
